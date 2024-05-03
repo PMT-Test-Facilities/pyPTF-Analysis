@@ -3,6 +3,13 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# data files
+data/*.root
+data/*.hdf5
+data/*.json
+
+pyPTF/analyses/plots/*.png
+
 # C extensions
 *.so
 
