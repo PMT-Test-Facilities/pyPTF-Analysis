@@ -105,7 +105,8 @@ def process_into_fitseries(meta_data:dict, which_pmt):
 
     keys = [
         "x","y","z","tilt","rot",
-        "amplitudes","sigmas","means","peds"
+        "amplitudes","sigmas","means","peds",
+        "n_pass"
     ]
     outdata = {key:[] for key in keys}
     
@@ -140,6 +141,7 @@ def process_into_fitseries(meta_data:dict, which_pmt):
         outdata["amplitudes"]+= this_ps.amplitudes
         outdata["sigmas"]+=this_ps.sigmas
         outdata["means"]+=this_ps.means
+        outdata["n_pass"] += [this_ps.npass, ]*len(this_ps)
 
     waveform_data.close()
     return outdata

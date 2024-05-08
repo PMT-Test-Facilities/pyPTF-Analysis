@@ -5,7 +5,7 @@ from math import sqrt, pi, log
 
 
 from scipy.signal import peak_widths
-from pyPTF.constants import PTF_SAMPLE_WIDTH, PTF_TS
+from pyPTF.constants import PTF_SAMPLE_WIDTH, PTF_TS, PTF_SCALE
 
 fwhm_scaler= 2*sqrt(2*log(2))
 
@@ -32,8 +32,13 @@ class PointScan:
         self._widths = []
         self._peds = []
         self._means = []
+        self._npass = 0
 
         self._which_pmt = which_pmt
+
+    @property
+    def npass(self):
+        return self._npass
 
     @property 
     def amplitudes(self):
@@ -46,7 +51,7 @@ class PointScan:
         return self._peds
     @property
     def means(self):
-        return self._means
+        return self._means.tolist()
 
     def __len__(self):
         return len(self._amplitudes)
@@ -101,10 +106,18 @@ class PointScan:
         """
         nbins = 10
 
-        self._peds = np.mean(waveform[:,-nbins:], axis=1)
+        self._peds = np.mean(waveform[:,0:nbins], axis=1)
+
         
+
         self._amplitudes = self._peds-np.min(waveform,axis=1)
         self._means = PTF_TS[np.argmin(waveform, axis=1)]
+
+        location_cut_pass = np.argmin(waveform, axis=1) > 10
+        amplitude_cut = self._amplitudes > 15*PTF_SCALE
+        time_cut = np.logical_and(self._means>56, self._means<90)
+
+        all_pass = np.logical_and(time_cut, amplitude_cut)
 
 
         # we need the indices of the peaks in the flattened coordinates 
@@ -115,7 +128,13 @@ class PointScan:
         flat_peaks = np.argmin( waveform, axis=1) + np.array(range(len(waveform)))*len(waveform[0])
         self._widths = peak_widths(-1*waveform.flatten(), flat_peaks)[0]*PTF_SAMPLE_WIDTH/fwhm_scaler
 
+        self._amplitudes = self._amplitudes[all_pass]
+        self._means = self._means[all_pass]
+        self._widths = self._widths[all_pass]
+        self._peds = self._peds[all_pass]
+        self._npass = len(self._amplitudes)/len(waveform)
 
+        print("({:.3f},{:.3f}) - {}".format(self._x, self._y, len(self._amplitudes)))
     
     def calculate_charge(self)->np.ndarray:
         """

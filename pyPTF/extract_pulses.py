@@ -10,6 +10,7 @@ import json
 from pyPTF.enums import PMT
 from pyPTF.process_raw import process_into_fitseries
 
+KEEP_WAVEFORMS =  False
 
 DATA_FOLDER = os.path.join(os.path.dirname(__file__), "..", "data")
 
@@ -157,9 +158,10 @@ def analyze_waveforms(run_number):
         meta_data=data,
         which_pmt=PMT.PTF_Monitor_PMT,
     )
-
-    os.remove(os.path.join(DATA_FOLDER, "convert_V1730_wave0.h5"))
-    os.remove(os.path.join(DATA_FOLDER, "convert_V1730_wave2.h5"))
+    
+    if not KEEP_WAVEFORMS:
+        os.remove(os.path.join(DATA_FOLDER, "convert_V1730_wave0.h5"))
+        os.remove(os.path.join(DATA_FOLDER, "convert_V1730_wave2.h5"))
 
     out_file = os.path.join(
         DATA_FOLDER,
@@ -185,11 +187,12 @@ if __name__=="__main__":
     if len(sys.argv)!=3:
         print("usage: ")
         print("extract_pulses.py  data_file.root run_number")
+        sys.exit() 
 
     outfile = os.path.splitext(sys.argv[1])[0] + ".hdf5"
     try:
         run_number = int(sys.argv[2])
-    except ValueError():
+    except ValueError as e:
         print("could not read run number {}".format(sys.argv[2]))
     
     root_to_hdf5(sys.argv[1], outfile)
