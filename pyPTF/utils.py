@@ -106,7 +106,7 @@ class PointScan:
         """
         nbins = 10
 
-        self._peds = np.mean(waveform[:,0:nbins], axis=1)
+        self._peds = np.mean(waveform[:,-nbins:], axis=1)
 
         
 
@@ -117,8 +117,10 @@ class PointScan:
         amplitude_cut = self._amplitudes > 15*PTF_SCALE
         time_cut = np.logical_and(self._means>56, self._means<90)
 
-        all_pass = np.logical_and(time_cut, amplitude_cut)
+        #all_pass = np.logical_and(time_cut, amplitude_cut)
 
+        #all_pass = np.logical_not(np.isnan(self._means))
+        all_pass = amplitude_cut
 
         # we need the indices of the peaks in the flattened coordinates 
         # so the `range` part is used as an offset 
@@ -134,7 +136,7 @@ class PointScan:
         self._peds = self._peds[all_pass]
         self._npass = len(self._amplitudes)/len(waveform)
 
-        print("({:.3f},{:.3f}) - {}".format(self._x, self._y, len(self._amplitudes)))
+        #print("({:.3f},{:.3f}) - {}".format(self._x, self._y, len(self._amplitudes)))
     
     def calculate_charge(self)->np.ndarray:
         """
