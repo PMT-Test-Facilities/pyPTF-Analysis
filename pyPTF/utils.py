@@ -7,6 +7,16 @@ from math import sqrt, pi, log
 from scipy.signal import peak_widths
 from pyPTF.constants import PTF_SAMPLE_WIDTH, PTF_TS, PTF_SCALE
 
+KEEP_ALL = True
+
+import matplotlib.pyplot as plt
+def get_color(n, colormax=3.0, cmap="viridis"):
+    """
+        Discretize a colormap. Great getting nice colors for a series of trends on a single plot! 
+    """
+    this_cmap = plt.get_cmap(cmap)
+    return this_cmap(n/colormax)
+
 fwhm_scaler= 2*sqrt(2*log(2))
 
 
@@ -93,6 +103,10 @@ class PointScan:
     def z(self):
         return self._z
     
+    @property
+    def pass_fract(self):
+        return self._npass
+    
     def extract_values(self, waveform):
         """
             Use neato numpy stuff to find the amplitudes for all of the waveforms simultaneously
@@ -118,9 +132,10 @@ class PointScan:
         time_cut = np.logical_and(self._means>56, self._means<90)
 
         #all_pass = np.logical_and(time_cut, amplitude_cut)
-
-        #all_pass = np.logical_not(np.isnan(self._means))
-        all_pass = amplitude_cut
+        if KEEP_ALL:
+            all_pass = np.logical_not(np.isnan(self._means))
+        else:
+            all_pass = amplitude_cut
 
         # we need the indices of the peaks in the flattened coordinates 
         # so the `range` part is used as an offset 
@@ -128,13 +143,15 @@ class PointScan:
         # the second is offset 1*(waveform size)
         # etc etc 
         flat_peaks = np.argmin( waveform, axis=1) + np.array(range(len(waveform)))*len(waveform[0])
-        self._widths = peak_widths(-1*waveform.flatten(), flat_peaks)[0]*PTF_SAMPLE_WIDTH/fwhm_scaler
+
+        expanded_pedestals = np.repeat(self._peds, len(waveform[0]))
+        self._widths = peak_widths(expanded_pedestals.flatten()-1*waveform.flatten(), flat_peaks)[0]*PTF_SAMPLE_WIDTH/fwhm_scaler
 
         self._amplitudes = self._amplitudes[all_pass]
         self._means = self._means[all_pass]
         self._widths = self._widths[all_pass]
         self._peds = self._peds[all_pass]
-        self._npass = len(self._amplitudes)/len(waveform)
+        self._npass = np.sum(amplitude_cut.astype(int))/len(amplitude_cut)
 
         #print("({:.3f},{:.3f}) - {}".format(self._x, self._y, len(self._amplitudes)))
     
