@@ -136,12 +136,18 @@ def process_into_fitseries(meta_data:dict, which_pmt):
         outdata["x"]+=[meta_data["gantry0_x"][i],]*len(this_ps)
         outdata["y"]+=[meta_data["gantry0_y"][i],]*len(this_ps)
         outdata["z"]+=[meta_data["gantry0_z"][i],]*len(this_ps)
-        outdata["tilt"]+=[meta_data["gantry0_rot"][i],]*len(this_ps)
-        outdata["rot"]+=[meta_data["gantry0_tilt"][i],]*len(this_ps)
+        outdata["rot"]+=[meta_data["gantry0_rot"][i],]*len(this_ps)
+        outdata["tilt"]+=[meta_data["phidg0_tilt"][i],]*len(this_ps)
         outdata["amplitudes"]+= this_ps.amplitudes
         outdata["sigmas"]+=this_ps.sigmas
         outdata["means"]+=this_ps.means
-        outdata["n_pass"] += [this_ps.npass, ]*len(this_ps)
+        if len(this_ps)!=0:
+            outdata["n_pass"] +=[this_ps.pass_fract/len(this_ps), ]*len(this_ps)
+        else:
+            outdata["n_pass"] +=[0, ]*len(this_ps)
+
+            
+            
 
     waveform_data.close()
     return outdata
