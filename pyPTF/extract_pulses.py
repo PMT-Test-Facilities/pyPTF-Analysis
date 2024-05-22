@@ -10,7 +10,7 @@ import json
 from pyPTF.enums import PMT
 from pyPTF.process_raw import process_into_fitseries
 
-KEEP_WAVEFORMS =  False
+KEEP_WAVEFORMS =  True
 
 DATA_FOLDER = os.path.join(os.path.dirname(__file__), "..", "data")
 
@@ -21,10 +21,6 @@ def parse_waveform(full_form, name):
     test = h5.File(os.path.join(DATA_FOLDER, "convert_{}.h5".format(name)), 'w')
     #full_form = wf_object.array(library='np')
     for i_scanpoint in range(len(full_form))[:]:
-        max_count = 3000
-        if len(full_form[i_scanpoint])>max_count:
-            continue 
-
                         
         test.create_dataset("scanpoint_{}_waveforms".format(i_scanpoint), data=np.array(full_form[i_scanpoint], dtype=int), dtype='i4')
         
@@ -84,12 +80,14 @@ def root_to_hdf5(root_file_path, hdf5_file_path):
                         parse_waveform(test, branch_name)
                         del test
                         continue
-                     
+                    elif branch_name=="phidg0_tilt":
+                        branch_data = np.array([np.mean(entry) for entry in tree[branch_name].array(library="np")])
+                        out_file.create_dataset(branch_name, data=branch_data)
                     elif any([test in branch_name.lower() for test in skip_keys]):
                         continue
+                    
                     else:
                         # Convert branch to numpy array
-                        print("branch", branch_name)
                         branch_data = tree[branch_name].array(library="np")
                         # Create a dataset in HDF5 file from the numpy array
                         out_file.create_dataset(branch_name, data=branch_data)
@@ -120,6 +118,8 @@ def reconstruct_json_as_dict(data):
             for i_wave in range(len(data[pmt][scanpoint]["amplitudes"])):
                 outdata[pmt]["x"].append(data[pmt][scanpoint]["x"])
                 outdata[pmt]["y"].append(data[pmt][scanpoint]["y"])
+                outdata[pmt]["tilt"].append(data[pmt][scanpoint]["tilt"])
+                outdata[pmt]["rot"].append(data[pmt][scanpoint]["rot"])
 
             outdata[pmt]["amplitudes"]+= data[pmt][scanpoint]["amplitudes"]
             outdata[pmt]["sigmas"] += data[pmt][scanpoint]["sigmas"]
@@ -175,7 +175,7 @@ def analyze_waveforms(run_number):
         "run_no":run_number
     }
 
-
+    print("... saving json file")
     _obj = open(out_file, 'wt')
     json.dump(out_data, _obj, indent=4)
     _obj.close()
@@ -195,6 +195,7 @@ if __name__=="__main__":
     except ValueError as e:
         print("could not read run number {}".format(sys.argv[2]))
     
+    print("... extracting root File")
     root_to_hdf5(sys.argv[1], outfile)
 
     analyze_waveforms(run_number)

@@ -14,7 +14,9 @@ import matplotlib.pyplot as plt
 from pyPTF.constants import PTF_SCALE
 from pyPTF.utils import make_bin_edges
 
-CHARGE_BINNING = np.linspace(0, 5000, 200)
+CHARGE_BINNING = np.linspace(0, 2000, 200)
+BIN_CENTERS = 0.5*(CHARGE_BINNING[:-1] + CHARGE_BINNING[1:])
+BIN_WIDTHS  = CHARGE_BINNING[1:] - CHARGE_BINNING[:-1]
 
 rtwo=sqrt(2)
 rpi = sqrt(2*pi)
@@ -40,40 +42,18 @@ def _fitfun(x, params):
 
     """
     
-    w = params[0]
+    norm0 = params[0]
     sigma0 = 10**params[1] 
     q0 =  params[2]
-    alpha = 10**params[3]
-    mu = params[4]
-    sigma1 = 10**params[5]
-    q1= params[6]
-    norm = params[7]
+    sigma1 = 10**params[3]
+    q1= params[4]
+    norm = params[5]
 
-    retval = w*alpha*np.exp(-alpha*x)
+    ped_peak = norm0*np.exp(-0.5*((x-q0)/sigma0)**2)
 
-    retval+=(1-w)*( np.exp(-0.5*((x-q0)/sigma0)**2) + alpha*np.exp(-alpha*(x-q0)))*np.exp(-mu)
+    q1_peak = norm*np.exp(-0.5*((x-q1)/sigma1)**2)
 
-    for _i in range(10):
-        n = _i+1
-        sigman = sqrt(n)*sigma1 
-        qn = n*q1
-
-        gauss= sqrt(2/pi)/(sigman*(1 + erf(qn/(sqrt(2)*sigman))))
-        gauss*=np.exp(-((x-qn)/(sqrt(2)*sigman))**2 )
-
-        retval += (1-w)*(mu**n)*np.exp(-mu)*gauss/gamma(1+n)
-
-    return retval*norm
-#gaussian( x[0], npe*q1, sqrt( npe )*s1 )
-    # retval += (1-w)*poisson_term( mu, npe ) * gaussian( x[0], npe*q1, sqrt( npe )*s1 )
-
-def _pedestal(x, params):
-    sigma0 = 10**params[0] 
-    q0 =  params[1]
-    norm = params[2]
-
-    rval= norm*np.exp(-0.5*((x-q0)/sigma0)**2)
-    return rval
+    return ped_peak + q1_peak
 
 def poisson_llh(x, y, params, function=_fitfun):
     """
@@ -83,82 +63,68 @@ def poisson_llh(x, y, params, function=_fitfun):
 
 
     exp = function(x, params)
-    metric= 0.5*(np.log10(exp) - np.log10(y))**2
 
-    metric[np.isnan(metric)] = 1e10
 #  
     metric = -1*(y*np.log(exp) - exp - loggamma(y+1))
     metric[np.isnan(metric)] = 1e5
     metric[np.isinf(metric)] = 1e5
     return np.sum(metric)
 
-
-def fit_binned_data(data, bin_centers):
-    """
-        Fits the charge distribution data and returns the fit parameters
-    """
-
-    pedestal_cut = 150
-    adc_cut = 2500
-
-    not_pedestal = np.logical_and(bin_centers<adc_cut,
-                                  bin_centers>pedestal_cut)
-    def call_check(params):
-        return poisson_llh(bin_centers[not_pedestal], 
-                           data[not_pedestal], params, _fitfun)    
-    def pedestal_call(params):
-        return poisson_llh(bin_centers[bin_centers<pedestal_cut], data[bin_centers<pedestal_cut], params, _pedestal)
+def gaus(x, params):
+        return params[0]*np.exp(-0.5*((x - params[1])/params[2])**2)
+def gaus_mu(x, params):
+        return params[0]*np.exp(-0.5*((x - params[1])/params[2])**2)*np.exp(-params[3])
 
 
+def fit_gaussian(xs, data, x0, bounds, func=gaus):
+        
+    def callf(params):
+        return poisson_llh(xs, data, params, func)
     
-    x0_ped = [1.4,2,np.sum(data[bin_centers<pedestal_cut])]
-    bounds_ped = [(-15,15), (-15,5000), (-np.inf, np.inf)]
     options = {
         "gtol":1e-20,
         "ftol":1e-20,
         "eps":0.0000001
     }
-    min_res_ped = minimize( pedestal_call, x0_ped, bounds=bounds_ped, options=options)
-    # sigma then q0
-    #print(sub_data)
+    result = minimize(callf, x0, bounds=bounds,options=options)
+    return result.x # norm, 
 
 
+def fit_binned_data(data, bin_centers=BIN_CENTERS, monitor=False):
+    """
+        Fits the charge distribution data and returns the fit parameters
+    """
+    if monitor:
+        pedestal_cut = 76
+    else:
+        pedestal_cut = 250
 
-    #q1_start = (bin_centers[bin_centers>pedestal_cut])[np.argmax(data[bin_centers>pedestal_cut])]
-    #print(q1_start)
+    other_cut = 500
+    
 
+    # first fit the pedestal peak
 
-    x0 = [
-        0.75, # w
-        min_res_ped.x[0], # sigma0
-        min_res_ped.x[1],  #Q0
-        -3, # alpha
-        2, # mu 
-        2, # sigma1
-        700, # Q1     
-        np.sum(data)# scale 
-    ]
-    bounds = [
-        (0, 0.01), # w
-        (-15,15), # sigma0 
-        (min_res_ped.x[1],min_res_ped.x[1]), # Q0 
-        (-15,-1), # alpha 
-        (0, 50), # mu 
-        (-15, 15), # sigma1
-        (600,5000) , #Q1 
-        (0, np.inf) # scale
-    ]
+    pedestal_res = fit_gaussian(
+        xs=bin_centers[bin_centers<pedestal_cut],
+        data=data[bin_centers<pedestal_cut],
+        x0=[np.sum(data[bin_centers<pedestal_cut]), 10, 50, 50],
+        bounds=[(1, np.inf),( 0, 100),(1, 200),(0, 10)],
+        func= gaus_mu
+    )    
+    sub_dat = data - gaus_mu(bin_centers, pedestal_res)
+    sub_dat[sub_dat<0]=0
 
-    min_res = minimize(call_check , x0, bounds=bounds, options=options)
-    if False:
-        min_res = basinhopping(call_check, min_res.x, minimizer_kwargs={
-            "bounds":bounds, "options":options
-        }, niter=10, stepsize=2)
-        print(min_res.x)
-    #min_res.x[0] = eff_w
-    return min_res.x
+    q1_res = fit_gaussian(
+        xs=bin_centers[bin_centers>pedestal_cut],
+        data=data[bin_centers>pedestal_cut],
+        x0=[np.sum(sub_dat), 700, 300],
+        bounds=[(0, np.inf),( 10, 2000),( 1, 1000)])
+    
+    # sometimes q1 snaps to 1 for some dumb reason...
+    # so we grab the point where it's the biggest but after the pedestal cut
+    return pedestal_res, q1_res
 
-def process_analysis(data_dict:dict):
+def process_analysis(data_dict:dict, is_monitor=False):
     """
         We prepare a dictionary of the analysis results where we bin data in a 2D grid. 
         At each point some quantity is evaluated and added here. 
@@ -181,22 +147,30 @@ def process_analysis(data_dict:dict):
 
     charges = get_analysis_charge(data_dict)
 
-    charge_edges = np.linspace(0, 5000, 200)
-    charge_bin_centers = 0.5*(charge_edges[:-1] + charge_edges[1:])
-    charge_bin_widths = charge_edges[1:] - charge_edges[:-1]
+    if is_monitor:
+        charge_bins = np.linspace(0, 1000, len(CHARGE_BINNING))
+    else:
+        charge_bins = CHARGE_BINNING
+
+    charge_bin_centers = 0.5*(charge_bins[:-1] + charge_bins[1:])
+    charge_bin_widths = charge_bins[1:] - charge_bins[:-1]
     sample = np.transpose([xs,ys,charges])
     binned_charges = np.histogramdd(
-        sample, bins=(x_edges, y_edges, charge_edges)
+        sample, bins=(x_edges, y_edges, charge_bins)
     )[0]
 
-    n_fits = np.histogram2d(xs, ys, bins=(x_edges,y_edges))[0]
+    x_centers = 0.5*(x_edges[:-1] + x_edges[1:])
+    y_centers = 0.5*(y_edges[:-1] + y_edges[1:])
+
+    print("binning charges")
+    det_eff = np.histogram2d(xs, ys, bins=(x_edges,y_edges), weights=data_dict["n_pass"])[0]
 
     results = {
         "avg_charge":np.zeros((n_x,n_y)),
         "Q_1":np.zeros((n_x,n_y)),
         "Sigma_1":np.zeros((n_x,n_y)),
         "mu":np.zeros((n_x,n_y)),    
-        "n_good_fits":np.zeros((n_x,n_y)),
+        "det_eff":np.zeros((n_x,n_y)),
         "hq1pemu":np.zeros((n_x,n_y)),
         "xs":x_edges,
         "ys":y_edges
@@ -204,17 +178,32 @@ def process_analysis(data_dict:dict):
 
     for ix in tqdm(range(n_x)):
         for jy in range(n_y):
-            fitparams = fit_binned_data(binned_charges[ix][jy]/charge_bin_widths, charge_bin_centers)
+            #fitparams = np.zeros(8)
+            fitped, q1_fit = fit_binned_data(binned_charges[ix][jy]/charge_bin_widths, charge_bin_centers, is_monitor)
+            if  abs(x_centers[ix]-0.4)<5e-3 and abs(y_centers[jy]-0.2)<5e-3:
+                print(fitped)
+                print(q1_fit)
+                plt.clf()
+                plt.stairs(binned_charges[ix][jy]/charge_bin_widths, charge_bins)
+                plt.plot(charge_bin_centers, gaus(charge_bin_centers, q1_fit) +gaus_mu(charge_bin_centers, fitped))
+                plt.xlabel("ADC", size=14)
+                plt.ylabel(r"Counts [ADC$^{-1}$]", size=14)
+                plt.yscale('log')
+                plt.savefig("charge_dist_near_middle.png",dpi=400)
+                plt.show()
+                plt.clf()
 
-            results["avg_charge"][ix][jy] = np.mean(binned_charges[ix][jy])
-            results["Q_1"][ix][jy] = fitparams[6]
-            results["Sigma_1"][ix][jy] = 10**fitparams[5]
-            results["mu"][ix][jy] = fitparams[4]
-            results["n_good_fits"][ix][jy] = n_fits[ix][jy]
-            results["hq1pemu"][ix][jy] = fitparams[6]*fitparams[4]
+            results["avg_charge"][ix][jy] = np.sum(binned_charges[ix][jy]*charge_bin_centers)/(np.sum(binned_charges[ix][jy]))
+            results["Q_1"][ix][jy] = q1_fit[1]
+            results["Sigma_1"][ix][jy] = q1_fit[2]
+            #results["mu"][ix][jy] = 10**fitparams[4]
+            results["det_eff"][ix][jy] = det_eff[ix][jy]
+
+            results["mu"][ix][jy] =  det_eff[ix][jy]*results["avg_charge"][ix][jy]  / (results["Q_1"][ix][jy])
+
+            results["hq1pemu"][ix][jy] = q1_fit[1]*results["mu"][ix][jy]
     
     return results
-
 
 
 def main_new(filename):
@@ -225,43 +214,69 @@ def main_new(filename):
     data = json.load(_obj)
     _obj.close()
 
+    run_no = data["run_no"]
+    monitor = process_analysis(data["monitor"], True)
     pmt_20in_res = process_analysis(data["pmt0"])
-    #charge = get_analysis_charge(data_dict["pmt0"])
-
+    
 
     #monitor_res = process_analysis(data["ptfanalysis02"]) 
 
+    out_name = os.path.join(os.path.dirname(__file__), "charge_results_{}.json".format(run_no))
+    parse_data = {
+        "pmt0":{},
+        "monitor":{}
+    }
+    for key in pmt_20in_res:
+        parse_data["pmt0"][key] = pmt_20in_res[key].tolist()
+        parse_data["monitor"][key] = monitor[key].tolist()
     
-    skip_keys = ["xs", "ys"]
+    _obj = open(out_name,'wt')
+    json.dump(parse_data, _obj, indent=4)
+    _obj.close()
+
+    
+    skip_keys =[
+        "rot","tilt", "x", "y", "run_no"
+    ]
     ratio = {}
 
     bounds_dict={
         "Q_1":[0,1000],
-        "Sigma_1":[0,500],
-        "mu":[0,50],
+        "Sigma_1":[0,700],
+        "mu":[0,0.5],
         "hq1pemu":[0,500],
-        "avg_charge":[0,0.15],
-        "n_good_fits":[0, 30]
+        #"avg_charge":[0,0.15],
+        "det_eff":[0., 2]
     }
 
     for key in pmt_20in_res.keys():
         if key in skip_keys:
             continue
-        ratio[key] =pmt_20in_res[key]
+        ratio[key] =pmt_20in_res[key]/monitor[key]
+        if len(np.shape(ratio[key])) !=2:
+            print(np.shape(ratio[key]))
+            print("skipping {}".format(key))
+            continue
         plt.clf()
+        print(key)
 
         if True:
-                if key in bounds_dict:
+                if False: # key=="det_eff":
+                    plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(ratio[key]), vmin=bounds_dict[key][0], vmax=bounds_dict[key][1], cmap='coolwarm')
+                elif False : # key in bounds_dict:
                     plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(ratio[key]), vmin=bounds_dict[key][0], vmax=bounds_dict[key][1], cmap='inferno')
+                
                 else:    
-                    plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(ratio[key])) #, vmin=-1, vmax=1, cmap='coolwarm')
+                    plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(ratio[key]), cmap='inferno', vmin=-1, vmax=5)
         else:
             plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(ratio[key]))
-        plt.colorbar()
+        cbar = plt.colorbar()
+        cbar.set_label("20in/Monitor")
         plt.xlabel("X [m]",size=14)
         plt.ylabel("Y [m]",size=14)
+        plt.gca().set_aspect('equal')
         plt.title(key, size=14)
-        plt.savefig(os.path.join(os.path.dirname(__file__), "plots", "{}.png".format(key)), dpi=400)
+        plt.savefig(os.path.join(os.path.dirname(__file__), "plots", "{}_{}.png".format(key,run_no)), dpi=400)
         
 
 def main(filename):
@@ -270,6 +285,7 @@ def main(filename):
     
     name, ext = os.path.splitext(filename)
 
+    print("... loading ")
     obj = open(filename, 'r')
     data_dict = json.load(obj)
     obj.close()
@@ -281,23 +297,25 @@ def main(filename):
     width = CHARGE_BINNING[1:] - CHARGE_BINNING[:-1]
     b_center = 0.5*(CHARGE_BINNING[:-1] + CHARGE_BINNING[1:])
     binned_data = np.histogram(charge, CHARGE_BINNING)[0]/(width)
-    plt.stairs(binned_data, CHARGE_BINNING, fill=False, label="Data")
+    
 
     # let's fit the pedestal first 
 
-    fit_params = fit_binned_data(binned_data, b_center)
+    ped, q1_res = fit_binned_data(binned_data, b_center)
     fine_xs = np.linspace(min(CHARGE_BINNING), max(CHARGE_BINNING), len(CHARGE_BINNING)*3)
-    fine_ys = _fitfun(fine_xs, fit_params)
+    plt.stairs(binned_data , CHARGE_BINNING, fill=False, label="Data")
+    fine_ys = gaus(fine_xs, q1_res) + gaus_mu(fine_xs, ped)
     #plt.xlim([0, 640])
     plt.plot(fine_xs, fine_ys, label="Fit")
     plt.ylim([1e-4, 2e5])
     plt.yscale('log')
     plt.legend()
+    
     plt.savefig(os.path.join(os.path.dirname(__file__), "plots", "charge_dist_all_{}.png".format(data_dict["run_no"])))
-
+    plt.show()
 
 if __name__=="__main__":
     import sys
-    main(sys.argv[1])
+    #main(sys.argv[1])
     main_new(sys.argv[1])
 
