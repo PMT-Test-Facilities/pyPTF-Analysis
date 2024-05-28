@@ -116,13 +116,13 @@ def make_plots(data):
         plt.clf()
         for i in range(0,3):            
             plt.plot(data[i]["zeniths"], data[i][key], 
-                     label=b_fields[i], color=get_color(i+1, 3))
+                     label=b_fields[i], color=get_color(i+1, 3), marker="d")
             plt.title(key, size=14)
             #plt.ylim([0.5, 1.5])
             plt.legend()
             plt.xlabel("Zenith [deg]", size=14)
-        plt.show()
-
+        plt.savefig("./plots/norm_{}.png".format(key),dpi=400)
+    
 
 def main():
     root = "/Users/bsmithers/software/pyPTF-Analysis/data/"

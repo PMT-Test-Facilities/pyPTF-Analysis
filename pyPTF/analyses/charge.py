@@ -14,6 +14,9 @@ import matplotlib.pyplot as plt
 from pyPTF.constants import PTF_SCALE
 from pyPTF.utils import make_bin_edges
 
+DEBUG = False
+RATIO = False
+
 CHARGE_BINNING = np.linspace(0, 2000, 200)
 BIN_CENTERS = 0.5*(CHARGE_BINNING[:-1] + CHARGE_BINNING[1:])
 BIN_WIDTHS  = CHARGE_BINNING[1:] - CHARGE_BINNING[:-1]
@@ -25,6 +28,7 @@ def get_analysis_charge(analysis):
     amplitude = np.array(analysis["amplitudes"][:])
     sigma= np.array(analysis["sigmas"][:])
     return rpi*np.abs(amplitude*sigma/2)/PTF_SCALE
+
 def get_other_charge(analysis):
     array = np.array(analysis["charges"])/PTF_SCALE
     return array 
@@ -147,6 +151,9 @@ def process_analysis(data_dict:dict, is_monitor=False):
 
     charges = get_analysis_charge(data_dict)
 
+    amps =np.array(data_dict['amplitudes'])/PTF_SCALE
+    sigs = np.array(data_dict["sigmas"])/PTF_SCALE
+
     if is_monitor:
         charge_bins = np.linspace(0, 1000, len(CHARGE_BINNING))
     else:
@@ -157,6 +164,11 @@ def process_analysis(data_dict:dict, is_monitor=False):
     sample = np.transpose([xs,ys,charges])
     binned_charges = np.histogramdd(
         sample, bins=(x_edges, y_edges, charge_bins)
+    )[0]
+
+    amp_bins = np.linspace(0,160,20)
+    binned_amps = np.histogramdd(
+        np.transpose([xs,ys,amps]), bins=(x_edges, y_edges,amp_bins)
     )[0]
 
     x_centers = 0.5*(x_edges[:-1] + x_edges[1:])
@@ -180,21 +192,25 @@ def process_analysis(data_dict:dict, is_monitor=False):
         for jy in range(n_y):
             #fitparams = np.zeros(8)
             fitped, q1_fit = fit_binned_data(binned_charges[ix][jy]/charge_bin_widths, charge_bin_centers, is_monitor)
-            if  abs(x_centers[ix]-0.4)<5e-3 and abs(y_centers[jy]-0.2)<5e-3:
+            if DEBUG and abs(x_centers[ix]-0.5)<5e-3 and abs(y_centers[jy]-0.3)<5e-3:
                 print(fitped)
                 print(q1_fit)
+                plt.title("Amplitude Distribution")
                 plt.clf()
-                plt.stairs(binned_charges[ix][jy]/charge_bin_widths, charge_bins)
-                plt.plot(charge_bin_centers, gaus(charge_bin_centers, q1_fit) +gaus_mu(charge_bin_centers, fitped))
-                plt.xlabel("ADC", size=14)
-                plt.ylabel(r"Counts [ADC$^{-1}$]", size=14)
+                #plt.stairs(binned_charges[ix][jy]/charge_bin_widths, charge_bins)
+                plt.stairs(binned_amps[ix][jy], amp_bins)
+                #plt.plot(charge_bin_centers, gaus(charge_bin_centers, q1_fit) +gaus_mu(charge_bin_centers, fitped))
+                plt.xlabel("Pulse Height [ADC]", size=14)
+                plt.ylabel(r"Counts", size=14)
                 plt.yscale('log')
-                plt.savefig("charge_dist_near_middle.png",dpi=400)
+                plt.savefig("amp_dist.png",dpi=400)
                 plt.show()
                 plt.clf()
 
             results["avg_charge"][ix][jy] = np.sum(binned_charges[ix][jy]*charge_bin_centers)/(np.sum(binned_charges[ix][jy]))
-            results["Q_1"][ix][jy] = q1_fit[1]
+            results["Q_1"][ix][jy] = results["avg_charge"][ix][jy]*det_eff[ix][jy]
+
+            #results["Q_1"][ix][jy] = q1_fit[1]
             results["Sigma_1"][ix][jy] = q1_fit[2]
             #results["mu"][ix][jy] = 10**fitparams[4]
             results["det_eff"][ix][jy] = det_eff[ix][jy]
@@ -240,19 +256,35 @@ def main_new(filename):
     ]
     ratio = {}
 
-    bounds_dict={
-        "Q_1":[0,1000],
-        "Sigma_1":[0,700],
-        "mu":[0,0.5],
-        "hq1pemu":[0,500],
+    ratio_bonds={
+        "Q_1":[0,20],
+        "Sigma_1":[0,5],
+        "mu":[0,3],
+        "hq1pemu":[0,7],
         #"avg_charge":[0,0.15],
         "det_eff":[0., 2]
     }
 
+    bounds_dict={
+        "Q_1":[0,700],
+        "Sigma_1":[0,700],
+        "mu":[0,0.5],
+        "hq1pemu":[0,500],
+        #"avg_charge":[0,0.15],
+        "det_eff":[0., 1]
+    }
+
+    bounds = ratio_bonds if RATIO else bounds_dict
+
+    title_keys = {key:key for key in pmt_20in_res.keys()}
+    title_keys["Q_1"] = r"$Q_{1}$ Gain"
+    title_keys["det_eff"] = "Detection Efficiency"
+
     for key in pmt_20in_res.keys():
         if key in skip_keys:
             continue
-        ratio[key] =pmt_20in_res[key]/monitor[key]
+    
+        ratio[key] =pmt_20in_res[key]/monitor[key] if RATIO else pmt_20in_res[key]
         if len(np.shape(ratio[key])) !=2:
             print(np.shape(ratio[key]))
             print("skipping {}".format(key))
@@ -261,10 +293,10 @@ def main_new(filename):
         print(key)
 
         if True:
-                if False: # key=="det_eff":
-                    plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(ratio[key]), vmin=bounds_dict[key][0], vmax=bounds_dict[key][1], cmap='coolwarm')
-                elif False : # key in bounds_dict:
-                    plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(ratio[key]), vmin=bounds_dict[key][0], vmax=bounds_dict[key][1], cmap='inferno')
+                if  key=="det_eff":
+                    plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(ratio[key]), vmin=bounds[key][0], vmax=bounds[key][1], cmap='inferno')
+                elif key in bounds_dict:
+                    plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(ratio[key]), vmin=bounds[key][0], vmax=bounds[key][1], cmap='inferno')
                 
                 else:    
                     plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(ratio[key]), cmap='inferno', vmin=-1, vmax=5)
@@ -275,7 +307,7 @@ def main_new(filename):
         plt.xlabel("X [m]",size=14)
         plt.ylabel("Y [m]",size=14)
         plt.gca().set_aspect('equal')
-        plt.title(key, size=14)
+        plt.title(title_keys[key], size=14)
         plt.savefig(os.path.join(os.path.dirname(__file__), "plots", "{}_{}.png".format(key,run_no)), dpi=400)
         
 

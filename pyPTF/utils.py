@@ -128,7 +128,7 @@ class PointScan:
         self._means = PTF_TS[np.argmin(waveform, axis=1)]
 
         location_cut_pass = np.argmin(waveform, axis=1) > 10
-        amplitude_cut = self._amplitudes > 15*PTF_SCALE
+        amplitude_cut = self._amplitudes > 30*PTF_SCALE
         time_cut = np.logical_and(self._means>56, self._means<90)
 
         #all_pass = np.logical_and(time_cut, amplitude_cut)

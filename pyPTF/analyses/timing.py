@@ -7,6 +7,7 @@ from math import log, sqrt
 
 from pyPTF.utils import get_color, make_bin_edges
 from pyPTF.constants import PTF_TS, PTF_SAMPLE_WIDTH
+print("time per sample: ", PTF_SAMPLE_WIDTH)
 from scipy.signal import peak_widths
 
 from tqdm import tqdm 
@@ -101,10 +102,22 @@ def main(filename):
     for ix in tqdm(range(n_x)):
         for jy in range(n_y):
             tt, tts = extract_values(time_centers, binned_diffs[ix][jy])
-            results["transit_time"][ix][jy]=tt
+            results["transit_time"][ix][jy]=tt - 20*2.014388489208633
             results["transit_time_spread"][ix][jy]=tts
 
-    plt.pcolormesh(x_edges,y_edges, np.transpose(results["transit_time"]), vmin=10, vmax=40, cmap="coolwarm")
+    obj = open("timing_results_{}.json".format(run_no),'wt')
+
+    output = {
+        "transit_time":results["transit_time"].tolist(),
+        "transit_time_spread":results["transit_time_spread"].tolist(),
+        "xs":x_edges.tolist(),
+        "ys":y_edges.tolist()
+
+    }
+    json.dump(output, obj,indent=4)
+    obj.close()
+
+    plt.pcolormesh(x_edges,y_edges, np.transpose(results["transit_time"]), vmin=-10, vmax=10, cmap="coolwarm")
     cbar = plt.colorbar()
     cbar.set_label("[ns]")
     plt.xlabel("X [m]",size=14)
