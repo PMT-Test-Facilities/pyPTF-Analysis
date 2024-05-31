@@ -10,7 +10,7 @@ import json
 from pyPTF.enums import PMT
 from pyPTF.process_raw import process_into_fitseries
 
-KEEP_WAVEFORMS =  True
+KEEP_WAVEFORMS =  False
 
 DATA_FOLDER = os.path.join(os.path.dirname(__file__), "..", "data")
 
@@ -159,13 +159,9 @@ def analyze_waveforms(run_number):
         which_pmt=PMT.PTF_Monitor_PMT,
     )
     
-    if not KEEP_WAVEFORMS:
-        os.remove(os.path.join(DATA_FOLDER, "convert_V1730_wave0.h5"))
-        os.remove(os.path.join(DATA_FOLDER, "convert_V1730_wave2.h5"))
-
     out_file = os.path.join(
         DATA_FOLDER,
-        "pulse_series_fit_run{}.json".format(run_number)
+        "pulse_series_fit_run{}.hdf5".format(run_number)
         )
     
     out_data = {
@@ -174,11 +170,21 @@ def analyze_waveforms(run_number):
         "data_folder" : data["data_folder"],
         "run_no":run_number
     }
-
-    print("... saving json file")
-    _obj = open(out_file, 'wt')
-    json.dump(out_data, _obj, indent=4)
+    print("saving hdf5 file")
+    _obj = h5.File(out_file, 'w')
+    for pmt_key in ["pmt0", "monitor"]:
+        for key in out_data[pmt_key].keys():
+            _obj.create_dataset("{}/{}".format(pmt_key, key), data=out_data[pmt_key][key])
+    _obj.create_dataset("run_no", data=out_data["run_no"])
+    _obj.create_dataset("data_folder", data=out_data["data_folder"])
     _obj.close()
+
+    print("Cleaning up")
+    if not KEEP_WAVEFORMS:
+        os.remove(main_file)
+        os.remove(os.path.join(DATA_FOLDER, "convert_V1730_wave0.h5"))
+        os.remove(os.path.join(DATA_FOLDER, "convert_V1730_wave2.h5"))
+
 
 
 # Example usage

@@ -22,6 +22,9 @@ fwhm_scaler= 2*sqrt(2*log(2))
 
 root_pi = sqrt(2*pi)
 
+def get_centers(bin_edges):
+    return 0.5*(bin_edges[:-1] + bin_edges[1:])
+
 
 class PointScan:
     """
@@ -118,22 +121,19 @@ class PointScan:
 
             Cool! 
         """
-        nbins = 10
+        nbins = 20
 
-        self._peds = np.mean(waveform[:,-nbins:], axis=1)
-
-        
+        self._peds = np.mean(waveform[:,:nbins], axis=1)
 
         self._amplitudes = self._peds-np.min(waveform,axis=1)
-        self._means = PTF_TS[np.argmin(waveform, axis=1)]
+        
 
-        location_cut_pass = np.argmin(waveform, axis=1) > 10
         amplitude_cut = self._amplitudes > 30*PTF_SCALE
-        time_cut = np.logical_and(self._means>56, self._means<90)
+
 
         #all_pass = np.logical_and(time_cut, amplitude_cut)
         if KEEP_ALL:
-            all_pass = np.logical_not(np.isnan(self._means))
+            all_pass = np.logical_not(np.isnan(self._amplitudes))
         else:
             all_pass = amplitude_cut
 
@@ -145,6 +145,14 @@ class PointScan:
         flat_peaks = np.argmin( waveform, axis=1) + np.array(range(len(waveform)))*len(waveform[0])
 
         expanded_pedestals = np.repeat(self._peds, len(waveform[0]))
+
+
+        threshs =self._amplitudes / 30*PTF_SCALE
+        threshs[threshs>1.0] = 0.999
+
+        rising_edges =peak_widths(expanded_pedestals.flatten()-1*waveform.flatten(), flat_peaks)[0]*PTF_SAMPLE_WIDTH
+        
+        self._means = PTF_TS[np.argmin(waveform, axis=1)] #- 0.5*rising_edges
         self._widths = peak_widths(expanded_pedestals.flatten()-1*waveform.flatten(), flat_peaks)[0]*PTF_SAMPLE_WIDTH/fwhm_scaler
 
         self._amplitudes = self._amplitudes[all_pass]
@@ -167,6 +175,13 @@ def make_bin_edges(series):
 
     parsed = np.unique(series.round(decimals=3))
     sorted_values = list(sorted(parsed))
+    if len(sorted_values)==0:
+        print(sorted_values)
+        raise ValueError()
+        return np.array([])
+    if len(sorted_values)==1:
+        return np.array([sorted_values[0]-0.1, sorted_values[0]+0.1])
+
     width = sorted_values[1] - sorted_values[0]
     return np.linspace(sorted_values[0] - 0.5*width, sorted_values[-1] + 0.5*width, len(sorted_values)+1)
 

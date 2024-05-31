@@ -14,10 +14,21 @@ import matplotlib.pyplot as plt
 from pyPTF.constants import PTF_SCALE
 from pyPTF.utils import make_bin_edges
 
+
+def get_centers(bin_edges):
+    return 0.5*(bin_edges[:-1] + bin_edges[1:])
+
+
+pmt_x = 0.417
+pmt_y = 0.297 
+
+pmt_radius =0.508/2
+
+
 DEBUG = False
 RATIO = False
 
-CHARGE_BINNING = np.linspace(0, 2000, 200)
+CHARGE_BINNING = np.linspace(-250, 2000, 200)
 BIN_CENTERS = 0.5*(CHARGE_BINNING[:-1] + CHARGE_BINNING[1:])
 BIN_WIDTHS  = CHARGE_BINNING[1:] - CHARGE_BINNING[:-1]
 
@@ -226,11 +237,9 @@ def main_new(filename):
     if not os.path.exists(filename):
         raise IOError("File not found {}".format(filename))
     name, ext = os.path.splitext(filename)
-    _obj = open(filename, 'r')
-    data = json.load(_obj)
-    _obj.close()
+    data = h5.File(filename,'r')
 
-    run_no = data["run_no"]
+    run_no = np.int64(data["run_no"])
     monitor = process_analysis(data["monitor"], True)
     pmt_20in_res = process_analysis(data["pmt0"])
     
@@ -271,7 +280,7 @@ def main_new(filename):
         "mu":[0,0.5],
         "hq1pemu":[0,500],
         #"avg_charge":[0,0.15],
-        "det_eff":[0., 1]
+        "det_eff":[0., 0.5]
     }
 
     bounds = ratio_bonds if RATIO else bounds_dict
@@ -292,9 +301,15 @@ def main_new(filename):
         plt.clf()
         print(key)
 
+        xmesh, ymesh = np.meshgrid(get_centers(pmt_20in_res["xs"]), get_centers(pmt_20in_res["ys"]))
+
+        exclude = (xmesh - pmt_x)**2 + (ymesh-pmt_y)**2 < pmt_radius**2
+
+
         if True:
                 if  key=="det_eff":
-                    plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(ratio[key]), vmin=bounds[key][0], vmax=bounds[key][1], cmap='inferno')
+                    print("Mean Detection: {}".format(np.mean(ratio[key][exclude.T])))
+                    plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(ratio[key]), vmin=bounds[key][0], vmax=bounds[key][1], cmap='jet')
                 elif key in bounds_dict:
                     plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(ratio[key]), vmin=bounds[key][0], vmax=bounds[key][1], cmap='inferno')
                 
@@ -303,7 +318,10 @@ def main_new(filename):
         else:
             plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(ratio[key]))
         cbar = plt.colorbar()
-        cbar.set_label("20in/Monitor")
+        if RATIO:
+            cbar.set_label("20in/Monitor")
+        else:
+            cbar.set_label("")
         plt.xlabel("X [m]",size=14)
         plt.ylabel("Y [m]",size=14)
         plt.gca().set_aspect('equal')
@@ -318,9 +336,7 @@ def main(filename):
     name, ext = os.path.splitext(filename)
 
     print("... loading ")
-    obj = open(filename, 'r')
-    data_dict = json.load(obj)
-    obj.close()
+    data_dict = h5.File(filename, 'r')
 
 
     charge = get_analysis_charge(data_dict["pmt0"])
@@ -328,7 +344,7 @@ def main(filename):
 
     width = CHARGE_BINNING[1:] - CHARGE_BINNING[:-1]
     b_center = 0.5*(CHARGE_BINNING[:-1] + CHARGE_BINNING[1:])
-    binned_data = np.histogram(charge, CHARGE_BINNING)[0]/(width)
+    binned_data = np.histogram(charge, CHARGE_BINNING)[0]/(width)   
     
 
     # let's fit the pedestal first 
@@ -343,7 +359,7 @@ def main(filename):
     plt.yscale('log')
     plt.legend()
     
-    plt.savefig(os.path.join(os.path.dirname(__file__), "plots", "charge_dist_all_{}.png".format(data_dict["run_no"])))
+    plt.savefig(os.path.join(os.path.dirname(__file__), "plots", "charge_dist_all_{}.png".format(np.int64(data_dict["run_no"]))))
     plt.show()
 
 if __name__=="__main__":

@@ -4,23 +4,23 @@ import numpy as np
 from pyPTF.constants import PTF_SCALE, PTF_TS, PTF_CAEN_V1730_SAMPLE_RATE
 import matplotlib.pyplot as plt 
 
-SAMPLESIZE = 70
+SAMPLESIZE = 140
 PTF_TS = np.linspace(0, float(SAMPLESIZE)*1000/PTF_CAEN_V1730_SAMPLE_RATE, SAMPLESIZE)
 
 
 data = h5.File(os.path.join(
-    os.path.dirname(__file__), "..","..","data","convert_V1730_wave0.h5"
+    os.path.dirname(__file__), "..","..","data","convert_V1730_wave2.h5"
 ), 'r')
 
 meta = h5.File(os.path.join(
-    os.path.dirname(__file__), "..","..","data","out_run05622.hdf5"
+    os.path.dirname(__file__), "..","..","data","out_run05633.hdf5"
 ), 'r')
 
 xcord = meta["gantry0_x"][:]
 ycord = meta["gantry0_y"][:]
 
 for j, scankey in enumerate(data.keys()):
-    if j%5000!=0: # plot every hundredth
+    if j%500!=0: # plot every hundredth
         continue
 
     i = int(scankey.split("_")[1])
@@ -32,14 +32,15 @@ for j, scankey in enumerate(data.keys()):
 
     for wave in these_waveforms:
         alpha = (8140 - np.min(wave))/60
-        alpha = max([min([0, alpha]),0.5])
+        alpha = max([min([0, alpha]),0.1])
 
 
-        plt.plot(PTF_TS[PTF_TS<550], wave[PTF_TS<550], alpha=alpha, color='k')
-        plt.xlabel("time [ns]", size=14)
+        plt.plot(PTF_TS, wave, alpha=alpha, color='k')
+        #plt.plot(49 + np.array(range(len(wave))), wave, alpha=alpha, color='k')
+        plt.xlabel("Time [ns]", size=14)
         plt.ylabel("ADC Counts" ,size=14)
         plt.title("{:.3f}-{:.3f}".format(xcord[i], ycord[i]))
-        plt.show()
+    plt.show()
    
     plt.savefig("./waveforms/wave_{}.png".format(i))
     if i==109:
