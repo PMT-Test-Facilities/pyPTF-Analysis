@@ -10,6 +10,7 @@ from pyPTF.utils import get_color, make_bin_edges
 from pyPTF.constants import PTF_TS, PTF_SAMPLE_WIDTH, PTF_SCALE
 print("time per sample: ", PTF_SAMPLE_WIDTH)
 from scipy.signal import peak_widths
+from scipy.optimize import minimize
 
 from tqdm import tqdm 
 
@@ -26,13 +27,35 @@ TIME_EDGES = np.linspace(
     min(PTF_TS)-0.5*PTF_SAMPLE_WIDTH, max(PTF_TS)+0.5*PTF_SAMPLE_WIDTH, len(PTF_TS)+1, endpoint=True
 )
 
-def extract_values(time_centers, tdiffs):
+def extract_values(time_centers, tdiffs, fancy=False):
     index = np.argmax(tdiffs)
 
     fwhm = peak_widths(tdiffs, [index,])[0]*PTF_SAMPLE_WIDTH
     width = fwhm/fwhm_scaler
+    
+    def metric(params):
+        values = params[0]*np.exp(-0.5*((params[1] - time_centers)/params[2])**2)
+        return np.sum((values - tdiffs)**2)
+    
+    x0 = [max(tdiffs), time_centers[index], width[0]]
+    bounds = [
+        (min(tdiffs), np.inf),
+        (100, 300),
+        (0.5, 15)
+    ]
+    res = minimize(metric, x0, bounds=bounds).x 
 
-    return time_centers[index]-0.5*fwhm, width
+    if fancy:
+        import matplotlib.pyplot as plt 
+        plt.bar(time_centers, tdiffs,width=time_centers[1]-time_centers[0], label="data", alpha=0.5)
+        fit_x = np.linspace(min(time_centers), max(time_centers), 1000)
+        fit_y = res[0]*np.exp(-0.5*((res[1] - fit_x)/res[2])**2)
+        plt.plot(fit_x, fit_y, label="fit", color="orange")
+        plt.legend()
+        plt.show()
+
+    return res[1], res[2]
+
 
 def main(filename):
     if not os.path.exists(filename):
@@ -45,13 +68,15 @@ def main(filename):
 
     main_amp = np.array(data_dict["pmt0"]["amplitudes"])
     other = np.array(data_dict["monitor"]["amplitudes"])
+    
+    main_mean =  np.array(data_dict["pmt0"]["means"])
+    keep = np.logical_and(main_amp>30*PTF_SCALE , main_mean > 150)
+    keep = np.logical_and(keep, main_mean < 225)
+    keep =  np.array(data_dict["pmt0"]["passing"])
+    
 
-    keep = main_amp>30*PTF_SCALE # np.logical_and(main_amp>30*PTF_SCALE, other>30*PTF_SCALE)
-    main_mean =  np.array(data_dict["pmt0"]["means"])[keep]
+    main_mean =  np.array(data_dict["pmt0"]["pulse_times"]) #  np.array(data_dict["pmt0"]["means"])[keep]
     monitor_mean = np.array(data_dict["monitor"]["means"])[keep]
-
-    if len(main_mean)!=len(monitor_mean):
-        raise Exception("extract_pulses should be ran keeping all waveforms!")
 
     diff = main_mean # - monitor_mean
     print(np.shape(diff))
@@ -79,7 +104,7 @@ def main(filename):
     plt.stairs(diff_histo, dif_bins)
     plt.xlabel("Time [ns]", size=14)
     plt.ylabel("Counts", size=14)
-    plt.title(r"$\mu_{20in} - \mu_{monitor}$")
+    plt.title(r"$\tau_{20in}$", size=14)
 
     plt.tight_layout()
     plt.savefig(
@@ -91,7 +116,7 @@ def main(filename):
 
     time_centers = 0.5*(dif_bins[1:] + dif_bins[:-1])
 
-    transit_time, spread = extract_values(time_centers, diff_histo)
+    transit_time, spread = extract_values(time_centers, diff_histo, True)
 
     print(transit_time)
     print(spread)
@@ -108,6 +133,9 @@ def main(filename):
     y_centers = 0.5*(y_edges[:-1] + y_edges[1:])
     n_x = len(x_edges)-1
     n_y = len(y_edges)-1
+    print(len(xs[keep]))
+    print(len(ys[keep]))
+    print(len(diff))
     sample = np.transpose([xs[keep], ys[keep], diff])
     binned_diffs = np.histogramdd(
         sample, bins=(x_edges,y_edges, dif_bins)
@@ -116,30 +144,33 @@ def main(filename):
         "transit_time":np.zeros((n_x,n_y)),
         "transit_time_spread":np.zeros((n_x,n_y))
     }
+    counter = 0
     for ix in tqdm(range(n_x)):
         for jy in range(n_y):
             y_shift = 0
 
-            shifts = [-0.075, 0.0, 0.075]
+            shifts = [-0.17, 0.0, 0.17]
             diffs = [abs(x_centers[ix] - (pmt_x+entry))<5e-3 for entry in shifts]
             #diffs = [abs(y_centers[jy] - (pmt_y+entry))<5e-3 for entry in shifts]
 
             if DEBUG and any(diffs) and abs(y_centers[jy]-(pmt_y+0))<5e-3:
-                plt.stairs(binned_diffs[ix][jy], dif_bins)
-                plt.xlabel(r"$T_{20in} - T_{mon}$", size=14)
+                counter+=1
+                plt.stairs(binned_diffs[ix][jy], dif_bins, color=get_color(counter, 4), lw=3, label="shift {:.3f}".format(x_centers[ix] - pmt_x))
+                plt.xlabel(r"$\tau_{20in}$", size=14)
                 plt.ylabel("Counts", size=14)
-                plt.title("X shift {:.3f}".format(x_centers[ix] - pmt_x))
-                plt.ylim([0,175])
+                plt.ylim([0,160])
                 plt.tight_layout()
-                plt.xlim([150,300])
-                plt.savefig("shift_{:.3f}_from_center.png".format(x_centers[ix] - pmt_x), dpi=400)
-                
-                plt.show()
+                plt.xlim([150,250   ]) 
 
-            tt, tts = extract_values(time_centers, binned_diffs[ix][jy])
+            fancy = any(diffs) and abs(y_centers[jy]-(pmt_y+0))<5e-3
+
+            tt, tts = extract_values(time_centers, binned_diffs[ix][jy], False)
             results["transit_time"][ix][jy]=tt
             results["transit_time_spread"][ix][jy]=tts
-
+    if DEBUG:
+        plt.legend()
+        plt.savefig("all_three.png", dpi=400)
+        plt.show()
     obj = open("timing_results_{}.json".format(run_no),'wt')
 
     output = {
@@ -157,7 +188,7 @@ def main(filename):
     exclude = (xmesh - pmt_x)**2 + (ymesh-pmt_y)**2 > pmt_radius**2
     results["transit_time"][exclude.T]=None
     results["transit_time_spread"][exclude.T] = None
-    plt.pcolormesh(x_edges,y_edges, np.transpose(results["transit_time"]), vmin=180, vmax=220, cmap="coolwarm")
+    plt.pcolormesh(x_edges,y_edges, np.transpose(results["transit_time"]), vmin=180, vmax=200, cmap="coolwarm")
     cbar = plt.colorbar()
     cbar.set_label("[ns]")
     plt.xlabel("X [m]",size=14)

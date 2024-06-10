@@ -106,14 +106,14 @@ def process_into_fitseries(meta_data:dict, which_pmt):
     keys = [
         "x","y","z","tilt","rot",
         "amplitudes","sigmas","means","peds",
-        "n_pass"
+        "n_pass", "pulse_times", "passing"
     ]
     outdata = {key:[] for key in keys}
     
 
-    for keyname in waveform_data.keys():
+    for keyname in tqdm(waveform_data.keys()):
         i = int(keyname.split("_")[1])
-        these_waveforms = np.array(waveform_data[keyname], dtype=float)*PTF_SCALE
+        these_waveforms = np.array(waveform_data[keyname], dtype=float)
         if len(these_waveforms)==0:
             print("No waveforms for scanpoint {}".format(i))
             continue
@@ -128,11 +128,13 @@ def process_into_fitseries(meta_data:dict, which_pmt):
             meta_data["gantry0_tilt"][i],
             which_pmt.value
         )
+
+        #print(keyname)
         
         # extract waveform values 
         this_ps.extract_values(these_waveforms)
 
-        
+        outdata["passing"]+=this_ps.passing
         outdata["x"]+=[meta_data["gantry0_x"][i],]*len(this_ps)
         outdata["y"]+=[meta_data["gantry0_y"][i],]*len(this_ps)
         outdata["z"]+=[meta_data["gantry0_z"][i],]*len(this_ps)
@@ -141,6 +143,7 @@ def process_into_fitseries(meta_data:dict, which_pmt):
         outdata["amplitudes"]+= this_ps.amplitudes
         outdata["sigmas"]+=this_ps.sigmas
         outdata["means"]+=this_ps.means
+        outdata["pulse_times"] += this_ps.pulse_times
         if len(this_ps)!=0:
             outdata["n_pass"] +=[this_ps.pass_fract/len(this_ps), ]*len(this_ps)
         else:

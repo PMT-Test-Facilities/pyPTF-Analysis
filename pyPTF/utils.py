@@ -2,12 +2,46 @@ import numpy  as np
 from pyPTF.enums import PMT
 
 from math import sqrt, pi, log
-
+import pandas as pd 
+import os 
 
 from scipy.signal import peak_widths
+from scipy.interpolate import RectBivariateSpline
+from scipy.optimize import minimize
 from pyPTF.constants import PTF_SAMPLE_WIDTH, PTF_TS, PTF_SCALE
 
 KEEP_ALL = True
+DEBUG  = False
+
+pmt_x = 0.417
+pmt_y = 0.297 
+
+pmt_radius =0.508/2
+
+
+optical_file = os.path.join(
+    os.path.dirname(__file__), "..", "data","optical_data.csv"
+)
+_optical_data = pd.read_csv(optical_file,header=0, delimiter="\s+")
+xs = np.unique(_optical_data["ray_x"]).tolist()
+ys = np.unique(_optical_data["ray_y"]).tolist()
+
+xs = np.round(np.arange(-max(xs), max(xs)+0.01, 0.01),2).tolist()
+
+
+print(xs)
+data = np.zeros((len(xs), len(ys)))
+for i in range(len(_optical_data["abs_prob"])):
+    ix = xs.index(_optical_data["ray_x"][i])
+    iy = ys.index(_optical_data["ray_y"][i])
+    data[ix][iy] = _optical_data["abs_prob"][i]
+    
+    ix = xs.index(-1*_optical_data["ray_x"][i])
+    data[ix][iy] = _optical_data["abs_prob"][i]
+
+optical_terpo = RectBivariateSpline(xs, ys, data)
+def abs_prob(x, y):
+    return optical_terpo(x -pmt_x, y-pmt_y)
 
 import matplotlib.pyplot as plt
 def get_color(n, colormax=3.0, cmap="viridis"):
@@ -40,14 +74,22 @@ class PointScan:
 
         self._rot = rot
         self._tilt = tilt
+        self._passing = []
 
         self._amplitudes = []
         self._widths = []
         self._peds = []
         self._means = []
+        self._pulse_times = None
         self._npass = 0
 
         self._which_pmt = which_pmt
+    @property
+    def passing(self):
+        return self._passing.tolist()
+    @property
+    def pulse_times(self):
+        return self._pulse_times.tolist()
 
     @property
     def npass(self):
@@ -110,6 +152,74 @@ class PointScan:
     def pass_fract(self):
         return self._npass
     
+    def extract_values_fit(self, waveform):
+        peds = []
+        amps = []
+        times = []
+        means = []
+        widths = []
+        pass_status = []
+        nbins = 20 
+
+        def dofit(this_waveform):
+            def metric(params):
+                return np.sum((this_waveform - params[0]*np.exp(-0.5*((PTF_TS - params[1])/params[2])**2))**2)
+
+            x0 = (max(this_waveform), PTF_TS[np.argmax(this_waveform)], 1)
+            bounds = [
+                (0, np.inf),
+                (10, 400),
+                (0.1, 100)
+            ]
+
+            passing = max(this_waveform)>30
+
+            if passing:
+                res = minimize(metric, x0, bounds=bounds).x
+                xfit = np.linspace(min(PTF_TS), max(PTF_TS), 1000)
+                yfit =res[0]*np.exp(-0.5*((xfit - res[1])/res[2])**2)
+
+                these_cross =  np.argwhere(np.diff(np.sign(yfit - 30))).flatten().tolist()
+                if len(these_cross)!=2:
+                    passing=False 
+                    this_pulse_time = None
+                else:
+                    this_pulse_time = xfit[these_cross[0]]
+            else:
+                this_pulse_time = None
+                res = (max(this_waveform), PTF_TS[np.argmax(this_waveform)], peak_widths(this_waveform, [np.argmax(this_waveform),] )[0][0]*PTF_SAMPLE_WIDTH/fwhm_scaler) 
+            
+            if DEBUG and max(this_waveform)>30:
+                plt.bar(PTF_TS, this_waveform, width=PTF_TS[1]-PTF_TS[0], color='blue', label="Data")
+                
+                plt.plot(xfit, yfit, label="Fit", color='orange')
+                plt.xlabel("Time [ns]",size=14)
+                plt.ylabel("ADC", size=14)
+                plt.show()
+
+
+            return res[0], res[1], res[2], this_pulse_time, passing
+
+        for wave in waveform:
+            peds.append( np.mean(wave[:nbins]))    
+            scaled = peds[-1] - wave 
+
+            amp, mean, width, pulse_time, passing = dofit(scaled)
+            amps.append(amp)
+            means.append(mean)
+            widths.append(width)
+            if passing:
+                times.append(pulse_time)
+            pass_status.append(passing)
+
+        self._amplitudes = np.array(amps)*PTF_SCALE
+        self._means = np.array(means)
+        self._widths = np.array(widths)
+        self._peds = np.array(peds)
+        self._pulse_times = np.array(times)
+        self._npass = len(times)/len(amps)
+        self._passing = np.array(pass_status)
+
     def extract_values(self, waveform):
         """
             Use neato numpy stuff to find the amplitudes for all of the waveforms simultaneously
@@ -128,8 +238,7 @@ class PointScan:
         self._amplitudes = self._peds-np.min(waveform,axis=1)
         
 
-        amplitude_cut = self._amplitudes > 30*PTF_SCALE
-
+        amplitude_cut = self._amplitudes > 30
 
         #all_pass = np.logical_and(time_cut, amplitude_cut)
         if KEEP_ALL:
@@ -147,20 +256,46 @@ class PointScan:
         expanded_pedestals = np.repeat(self._peds, len(waveform[0]))
 
 
-        threshs =self._amplitudes / 30*PTF_SCALE
-        threshs[threshs>1.0] = 0.999
 
-        rising_edges =peak_widths(expanded_pedestals.flatten()-1*waveform.flatten(), flat_peaks)[0]*PTF_SAMPLE_WIDTH
-        
-        self._means = PTF_TS[np.argmin(waveform, axis=1)] #- 0.5*rising_edges
+        self._means = PTF_TS[np.argmin(waveform, axis=1)] 
         self._widths = peak_widths(expanded_pedestals.flatten()-1*waveform.flatten(), flat_peaks)[0]*PTF_SAMPLE_WIDTH/fwhm_scaler
 
-        self._amplitudes = self._amplitudes[all_pass]
+        # to get the pulse times, we use our fit mean and width
+        # to determine the pulse shape at a much more granular scale 
+
+        passing = np.logical_and(amplitude_cut, self._means > 150)
+        passing = np.logical_and(passing, self._means < 225)
+
+        if self._which_pmt==PMT.Hamamatsu_R3600_PMT.value:
+            rescale_amt = 8 # scale factor for granularity 
+            super_TS = np.linspace(min(PTF_TS), max(PTF_TS), rescale_amt*len(PTF_TS), endpoint=True)
+            amp_mesh, time_mesh = np.meshgrid(self._amplitudes, super_TS)
+            mean_mesh, time_mesh = np.meshgrid(self._means, super_TS)
+            width_mesh, time_mesh = np.meshgrid(self._widths, super_TS)
+            fits = np.transpose(amp_mesh*np.exp(-0.5*((time_mesh - mean_mesh)/(width_mesh))**2 ))
+                    
+            # without this, spurious signals poke through
+            fits[np.logical_not(passing)]*=0
+            idxs = []
+            for it, this_fit in enumerate(fits):
+                
+
+                these_cross =  np.argwhere(np.diff(np.sign(this_fit - 30))).flatten().tolist()
+                if len(these_cross)==2:
+                    idxs+=[these_cross[0]]
+                else:
+                    passing[it] = False
+            # get where the fit pulses cross the threshold 
+
+            self._pulse_times = np.array(super_TS[idxs])
+        else:
+            self._pulse_times = self._means[all_pass]
+        self._amplitudes = self._amplitudes[all_pass]*PTF_SCALE
         self._means = self._means[all_pass]
         self._widths = self._widths[all_pass]
-        self._peds = self._peds[all_pass]
+        self._peds = self._peds[all_pass]*PTF_SCALE
         self._npass = np.sum(amplitude_cut.astype(int))/len(amplitude_cut)
-
+        self._passing = passing
         #print("({:.3f},{:.3f}) - {}".format(self._x, self._y, len(self._amplitudes)))
     
     def calculate_charge(self)->np.ndarray:

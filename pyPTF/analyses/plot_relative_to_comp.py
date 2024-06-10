@@ -5,9 +5,9 @@ import numpy as np
 from scipy.interpolate import RectBivariateSpline
 
 import matplotlib.pyplot as plt 
+from pyPTF.utils import get_centers
 
-def get_centers(bin_edges):
-    return 0.5*(bin_edges[:-1] + bin_edges[1:])
+DBL_RATIO = False
 
 pmt_x = 0.417
 pmt_y = 0.297 
@@ -89,24 +89,31 @@ if __name__=="__main__":
 
     root_folder = os.path.dirname(__file__)
 
-    compensated = "charge_results_5649.json"
-    time_comp = "timing_results_5649.json"
+    compensated = "charge_results_5653.json"
+    time_comp = "timing_results_5653.json"
 
     fields = [
-        250, 
-        500 
+        "250 y", 
+        "500 y",
+        "500 x",
+        "250 x" 
     ]
 
     filenames = [
         "charge_results_5633.json",
-        "charge_results_5630.json"
+        "charge_results_5630.json",
+        "charge_results_5650.json",
+        "charge_results_5651.json"
     ]
     time_names = [
         "timing_results_5633.json",
         "timing_results_5630.json",
+        "timing_results_5650.json",
+        "timing_results_5651.json",
     ]
 
     compensated_data = load_data(os.path.join(root_folder, compensated))
+    #compensated_data["pmt0"]["xs"] -= 0.03
 
     time_comp = load_data(os.path.join(root_folder, time_comp), True)
     for key in time_keys:
@@ -133,27 +140,31 @@ if __name__=="__main__":
         allkey = keys + time_keys
 
         for key in allkey:
-            if "time" in key:
+            if "time" in key and "spread" not in key:
                 double_ratio = (this_data["pmt0"][key]) - (compensated_data["pmt0"][key])
             else:
-                #double_ratio = (this_data["pmt0"][key]/this_data["monitor"][key])/(compensated_data["pmt0"][key]/compensated_data["monitor"][key])
-                double_ratio = (this_data["pmt0"][key])/(compensated_data["pmt0"][key])
+                if DBL_RATIO and not "spread" in key:
+                    double_ratio = (this_data["pmt0"][key]/this_data["monitor"][key])/(compensated_data["pmt0"][key]/compensated_data["monitor"][key])
+                else:
+                    double_ratio = (this_data["pmt0"][key])/(compensated_data["pmt0"][key])
             double_ratio[exclude.T] = None
     
             plt.clf()
             if "time" in key and "spread" not in key:
-                scale = 5 if "spread" in key else 20
+                scale = 5 if "spread" in key else 8
 
                 plt.pcolormesh(compensated_data["pmt0"]["xs"], compensated_data["pmt0"]["ys"], double_ratio.T, vmin=-scale, vmax=scale, cmap='coolwarm')
             else:
-                plt.pcolormesh(compensated_data["pmt0"]["xs"], compensated_data["pmt0"]["ys"], double_ratio.T, vmin=0, vmax=2, cmap='coolwarm')
+                plt.pcolormesh(compensated_data["pmt0"]["xs"], compensated_data["pmt0"]["ys"], double_ratio.T, vmin=0.5, vmax=1.5, cmap='coolwarm')
             cbar = plt.colorbar()
             cbar.set_label(r"$\frac{(SK_{B+}/Mon_{B+})}{(SK_{B0}/Mon_{B0})}$")
             if "time" in key and "spread" not in key:
                 cbar.set_label(r"$SK_{B+} - SK_{B0} $")
             else:
-                #cbar.set_label(r"$\frac{(SK_{B+}/Mon_{B+})}{(SK_{B0}/Mon_{B0})}$")
-                cbar.set_label(r"$SK_{B+} / SK_{B0} $")
+                if DBL_RATIO and not "spread" in key:
+                    cbar.set_label(r"$\frac{(SK_{B+}/Mon_{B+})}{(SK_{B0}/Mon_{B0})}$")
+                else:
+                    cbar.set_label(r"$SK_{B+} / SK_{B0} $")
             plt.xlabel("X [m]", size=14)
             plt.ylabel("Y [m]", size=14)
             plt.title(title_keys[key] +", "+ str(fields[i]) + " mG")

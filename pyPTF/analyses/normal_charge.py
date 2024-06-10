@@ -47,7 +47,7 @@ def process_dataset_charge(data_dict):
         hq1pemu = gain*mu
 
         gains.append(q1_fit[1])
-        det_effs.append(sum(passing[xpos==xs]) )
+        det_effs.append(sum(passing[xpos==xs])/4 )
     
     return {
         "zeniths":np.array(zeniths_deg),
