@@ -29,6 +29,8 @@ MPMT_TS = np.linspace(0, float(SAMPLESIZE)*1000/MPMT_DIGITIZER_SAMPLE_RATE, SAMP
 def get_PMT_channel(which:PMT):
     if which==PMT.Hamamatsu_R3600_PMT:
         return 0
+    elif which==PMT.Timing_NotAPMT:
+        return 1
     elif which==PMT.PTF_Monitor_PMT:
         return 2
     else:

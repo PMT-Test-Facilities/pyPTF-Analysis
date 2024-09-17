@@ -11,7 +11,7 @@ from scipy.optimize import minimize
 from pyPTF.constants import PTF_SAMPLE_WIDTH, PTF_TS, PTF_SCALE
 
 KEEP_ALL = True
-DEBUG  = False
+DEBUG  = True
 
 pmt_x = 0.417
 pmt_y = 0.297 
@@ -38,6 +38,7 @@ for i in range(len(_optical_data["abs_prob"])):
     
     ix = xs.index(-1*_optical_data["ray_x"][i])
     data[ix][iy] = _optical_data["abs_prob"][i]
+
 
 optical_terpo = RectBivariateSpline(xs, ys, data)
 def abs_prob(x, y):
@@ -109,7 +110,7 @@ class PointScan:
         return self._means.tolist()
 
     def __len__(self):
-        return len(self._amplitudes)
+        return len(self._passing)
 
     def pack(self)->dict:
         return {
@@ -220,6 +221,16 @@ class PointScan:
         self._npass = len(times)/len(amps)
         self._passing = np.array(pass_status)
 
+    def extract_timing_signal(self, waveform):
+        inverted = waveform*-1 
+
+
+        self._passing = np.ones(len(waveform)).astype(bool)
+        self._pulse_times = []
+        for wave in waveform:
+            crossing = np.argwhere(np.diff(np.sign(8200 - wave - 2000)))[0][0]
+            self._pulse_times.append( PTF_TS[crossing] )
+        self._pulse_times = np.array(self._pulse_times)
     def extract_values(self, waveform):
         """
             Use neato numpy stuff to find the amplitudes for all of the waveforms simultaneously
@@ -262,9 +273,19 @@ class PointScan:
 
         # to get the pulse times, we use our fit mean and width
         # to determine the pulse shape at a much more granular scale 
-
-        passing = np.logical_and(amplitude_cut, self._means > 150)
-        passing = np.logical_and(passing, self._means < 225)
+        # 49 -60 for monitor 
+        # 23-45 for pmt0
+        if  True:
+            if self._which_pmt==PMT.Hamamatsu_R3600_PMT.value:
+                passing = np.logical_and(amplitude_cut, self._means > 270*PTF_SAMPLE_WIDTH)
+                passing = np.logical_and(passing, self._means < 291*PTF_SAMPLE_WIDTH)
+            elif self._which_pmt==PMT.PTF_Monitor_PMT.value:
+                passing = np.logical_and(amplitude_cut, self._means > 49*PTF_SAMPLE_WIDTH)
+                passing = np.logical_and(passing, self._means < 60*PTF_SAMPLE_WIDTH)
+            else:
+                passing = np.logical_and(amplitude_cut, self._means > 150)
+                passing = np.logical_and(passing, self._means < 225)
+        passing = amplitude_cut
 
         if self._which_pmt==PMT.Hamamatsu_R3600_PMT.value:
             rescale_amt = 8 # scale factor for granularity 
@@ -276,25 +297,30 @@ class PointScan:
                     
             # without this, spurious signals poke through
             fits[np.logical_not(passing)]*=0
+            waveform[np.logical_not(passing)]*=0
             idxs = []
             for it, this_fit in enumerate(fits):
                 
 
-                these_cross =  np.argwhere(np.diff(np.sign(this_fit - 30))).flatten().tolist()
+                #these_cross =  np.argwhere(np.diff(np.sign(this_fit - 30))).flatten().tolist()
+                these_cross = np.argwhere(np.diff(np.sign(self._peds[it] - waveform[it] - 30))).flatten().tolist()
                 if len(these_cross)==2:
                     idxs+=[these_cross[0]]
                 else:
                     passing[it] = False
             # get where the fit pulses cross the threshold 
 
-            self._pulse_times = np.array(super_TS[idxs])
+            #self._pulse_times = np.array(super_TS[idxs])
+            self._pulse_times = np.array(PTF_TS[idxs])
         else:
             self._pulse_times = self._means[all_pass]
+        
+
         self._amplitudes = self._amplitudes[all_pass]*PTF_SCALE
         self._means = self._means[all_pass]
         self._widths = self._widths[all_pass]
         self._peds = self._peds[all_pass]*PTF_SCALE
-        self._npass = np.sum(amplitude_cut.astype(int))/len(amplitude_cut)
+        self._npass = np.sum(passing.astype(int))/len(passing)
         self._passing = passing
         #print("({:.3f},{:.3f}) - {}".format(self._x, self._y, len(self._amplitudes)))
     
@@ -318,7 +344,8 @@ def make_bin_edges(series):
         return np.array([sorted_values[0]-0.1, sorted_values[0]+0.1])
 
     width = sorted_values[1] - sorted_values[0]
-    return np.linspace(sorted_values[0] - 0.5*width, sorted_values[-1] + 0.5*width, len(sorted_values)+1)
+    return np.arange(sorted_values[0] - 0.5*width, sorted_values[-1] + 0.5*width, width)
+    return np.linspace(sorted_values[0] - 0.5*width, sorted_values[-2] + 0.5*width, len(sorted_values)+1)
 
 def get_loc(x:float, domain:list,closest=False):
     """
@@ -398,3 +425,21 @@ def get_closest(x, domain, mapped):
     
     return(value)
 
+def point_plane_distance(point:np.ndarray, plane_p0:np.ndarray, plane_norm:np.ndarray):
+    """
+        Returns the distance of `point` from the plane defined by an origin point `plane_p0`
+        and a plane normal vector `plane_norm`
+        each entry should be a length-3 numpy array 
+    """
+
+    # we don't assume that the user has actually... normalized... the plane norm 
+    # this falls out of a fun little vector calc / geometry problem 
+    return (np.dot(point, plane_norm) - np.dot(plane_p0, plane_norm)) / np.dot(plane_norm, plane_norm)
+
+def project_point_to_plane(point:np.ndarray, plane_p0:np.ndarray, plane_norm:np.ndarray):
+    """
+        each entry should be a length-3 numpy array 
+    """
+    distance = point_plane_distance(point, plane_p0, plane_norm)
+
+    return point - plane_p0 - plane_norm*distance

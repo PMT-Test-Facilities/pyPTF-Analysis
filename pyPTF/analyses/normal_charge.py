@@ -9,6 +9,9 @@ from pyPTF.analyses.timing import TIME_EDGES, extract_values
 from pyPTF.constants import PTF_TS, PTF_SAMPLE_WIDTH
 from pyPTF.utils import get_color
 
+from math import sqrt
+import h5py as h5 
+
 
 def process_dataset_charge(data_dict):
     xs = np.array(data_dict["x"][:])
@@ -22,46 +25,74 @@ def process_dataset_charge(data_dict):
 
     charges = get_analysis_charge(data_dict)
     passing = np.array(data_dict["n_pass"])
-    print(passing)
+    keep =  np.array(data_dict["passing"])
     # we bin these in position
 
-    zeniths_deg = [10, 20, 30, 40, 45]
-
+    #zeniths_deg = [10, 20, 30, 40, 45, 50, 60, 70, 80, 85]
+    zeniths_deg = [85, 80, 75, 70, 65, 60, 55, 50,45,40,30,20,10, 0][::-1]
+    zeniths_deg = []
     gains = []
     det_effs = []
+    stat_errors = []
 
     for xpos in unique_x[::-1]:
+        zeniths_deg.append(90+np.mean(tilt[xpos==xs]))
+        total_wav = sum(keep[xpos==xs].astype(int))
+        
         these_charges = charges[xpos==xs]
+        det_eff = sum(data_dict["n_pass"][xpos==xs])/4
+
+        stat_error = sqrt(total_wav*det_eff)/(total_wav*det_eff)
+        stat_errors.append( sqrt(stat_error**2 + 0.05**2) )
+
+
 
         binned_charges = np.histogram(these_charges, CHARGE_BINNING)[0]/BIN_WIDTHS
 
         fitped, q1_fit = fit_binned_data(binned_charges)
         
 
-        avg_charge = np.sum(binned_charges*BIN_CENTERS)/np.sum(binned_charges)
-        gain = q1_fit[1]
-        gain_width = q1_fit[2]
+        avg_charge = np.mean(these_charges)
+        gain =  q1_fit[1]#  avg_charge/det_eff
+        
+        if gain<15:
+            print(gain, det_eff, avg_charge/det_eff)
+            gain=avg_charge/det_eff
    
-        det_eff = sum(passing[xpos==xs])/4 
-        mu = det_eff*avg_charge/gain
-        hq1pemu = gain*mu
-
-        gains.append(q1_fit[1])
-        det_effs.append(sum(passing[xpos==xs])/4 )
+        gains.append(gain)
+        det_effs.append( det_eff )
     
-    return {
-        "zeniths":np.array(zeniths_deg),
-        "gain":np.array(gains),
-        "det_effs":np.array(det_effs)
-    }
-    
+    if True : # len(gains)==10:
+        return {
+            "zeniths":np.array(zeniths_deg),
+            "gain":np.array(gains),
+            "det_effs":np.array(det_effs),
+            "stat_error":np.array(stat_errors)
+        }
+    else:
+        return {
+            "zeniths":np.array(zeniths_deg[:-1]),
+            "gain":np.array(gains),
+            "det_effs":np.array(det_effs),
+            "stat_error":np.array(stat_errors)
+        }
+        
 def extract_transit_times(data_dict):
     # timing! 
-    main_mean =  np.array(data_dict["pmt0"]["means"])
-    monitor_mean = np.array(data_dict["monitor"]["means"])
-    diff = main_mean - monitor_mean
+    keep =  np.array(data_dict["pmt0"]["passing"])
+    main_mean =  np.array(data_dict["pmt0"]["pulse_times"])
 
-    dif_bins = np.arange(-45, 45, PTF_SAMPLE_WIDTH)
+    monitor_mean = np.array(data_dict["timing_data"]["pulse_times"])[keep]
+
+    diff = (main_mean+290) - monitor_mean
+
+    dif_bins = np.arange(230, 310,PTF_SAMPLE_WIDTH)
+
+    all_hist = np.histogram(diff, bins=dif_bins)[0]
+    plt.stairs(all_hist, dif_bins)
+    plt.xlabel("Transit Time [ns]",size=14)
+    plt.ylabel("Counts",size=14)
+    plt.show()
 
     xs = np.array(data_dict["pmt0"]["x"][:])
     ys = np.array(data_dict["pmt0"]["y"][:])
@@ -72,13 +103,17 @@ def extract_transit_times(data_dict):
     unique_x = np.unique(xs)
     tt = []
     tts = []
+    from math import sqrt, log
 
+    fwhm_scaler= 2*sqrt(2*log(2))
+
+    time_centers = 0.5*(dif_bins[1:] + dif_bins[:-1])
     for xpos in unique_x[::-1]:
-        diff_histo = np.histogram(diff[xs==xpos])[0]
-        time_centers = 0.5*(dif_bins[1:] + dif_bins[:-1])
+        diff_histo = np.histogram(diff[xs[keep]==xpos], bins=dif_bins)[0]
+        
         transit_time, spread = extract_values(time_centers, diff_histo)
         tt.append(transit_time)
-        tts.append(spread)
+        tts.append(spread*fwhm_scaler)
     return {
         "transit_times": np.array(tt),
         "transit_time_spread":np.array(tts)
@@ -89,9 +124,7 @@ def get_data(filename):
         raise IOError("File not found {}".format(filename))
     
     print("... loading ")
-    obj = open(filename, 'r')
-    data_dict = json.load(obj)
-    obj.close()
+    data_dict = h5.File(filename,'r')
 
 
     pmt_20 = process_dataset_charge(data_dict["pmt0"])
@@ -102,45 +135,122 @@ def get_data(filename):
     pmt_20["transit_time"] = time_data["transit_times"]
     pmt_20["transit_time_spread"] = time_data["transit_time_spread"]
 
-    return pmt_20
+    return pmt_20, monitor
 
-def make_plots(data):
-    b_fields = ["Compensated", "250mG", "500mG"]
+def make_plots(data, mon):
+    b_fields = ["Compensated"]
 
     # gain 
     keys = [
         "transit_time", "transit_time_spread", "gain", "det_effs"
     ]
 
-    for key in keys:
+    runlab = [
+        "Perpendicular",
+        "Diagonal",
+    ]
+
+    labels={
+        "transit_time":"Relative TT",
+        "transit_time_spread": "TTS (FWHM)",
+        "gain":"Relative Gain",
+        "det_effs":"Relative Hit Eff."
+    }
+
+    takefiles = [
+        "take_transit",
+        "take_tts",
+        "take_gain",
+        "take_eff"
+    ]
+
+    bounds = [
+        [-6, 10],
+        [0, 20],
+        [0, 1.6],
+        [0, 1.5],
+        
+    ]
+
+    for ik, key in enumerate(keys):
         plt.clf()
-        for i in range(0,3):            
-            plt.plot(data[i]["zeniths"], data[i][key], 
-                     label=b_fields[i], color=get_color(i+1, 3), marker="d")
-            plt.title(key, size=14)
-            #plt.ylim([0.5, 1.5])
-            plt.legend()
-            plt.xlabel("Zenith [deg]", size=14)
-        plt.savefig("./plots/norm_{}.png".format(key),dpi=400)
+        print(key)
+        for i in [0,1]:          
+            if "transit_time" in key and "spread" not in key: 
+                print(len(data[i]["zeniths"]), len(data[i][key]-data[i][key][0]))
+                plt.errorbar(data[i]["zeniths"], data[i][key]-data[i][key][0],
+                      yerr=0.05*(data[i][key]-data[i][key][0]), capsize=5, ecolor='k',
+                      color=get_color(i+1, 3), marker="d")# , label=runlab[i])
+            elif "spread" in key:
+                plt.errorbar(data[i]["zeniths"], data[i][key], 
+                      yerr=0.05*data[i][key], capsize=5, ecolor='k',
+                      color=get_color(i+1, 3), marker="d")# , label=runlab[i])
+            else:
+
+                toplot = data[i][key] #/ mon[i][key]
+
+                if "eff" in key:
+                    plt.errorbar(data[i]["zeniths"], toplot/toplot[0], xerr=0,
+                                yerr=data[i]["stat_error"], capsize=5, ecolor='k',
+                            color=get_color(i+1, 3), marker="d") #, label=runlab[i])
+                else:
+                    plt.errorbar(data[i]["zeniths"], toplot/toplot[0],
+                            yerr=0.05*toplot/toplot[0], capsize=5, ecolor='k',
+                            color=get_color(i+1, 3), marker="d")# , label=runlab[i])
+
+
+
+
+        errors = data[i]["det_effs"]
+        plt.title(labels[key], size=14)
+        plt.ylim(bounds[ik])
+
+        # perpendicular first 
+        newdat = np.loadtxt("./datafiles/{}_y.dat".format(takefiles[ik]), delimiter=",",comments="#").T
+        cut = newdat[0]>-5
+        plt.plot(newdat[0][cut], newdat[1][cut],marker="x", color=get_color(0+1, 3))
+        newdat = np.loadtxt("./datafiles/{}_d.dat".format(takefiles[ik]), delimiter=",",comments="#").T
+        cut = newdat[0]>-5
+        plt.plot(newdat[0][cut], newdat[1][cut],marker="x", color=get_color(1+1, 3))
+        #plt.ylim([0.5, 1.5])
+        
+        plt.xlabel("Zenith [deg]", size=14)
+           
+        plt.plot([], [], color='k', marker="x", label="Takenaka-san")
+        plt.plot([], [], color='k', marker="d", label="PTF")
+        plt.plot([], [], color=get_color(0+1, 3), marker="o", label="Diagonal")
+        plt.plot([], [], color=get_color(1+1, 3), marker="o", label="Y-axis")
+        plt.legend()
+        plt.savefig("./plots/norm_{}_first.png".format(key),dpi=400)
     
 
 def main():
     root = "/Users/bsmithers/software/pyPTF-Analysis/data/"
-    
 
     files = [
-        "pulse_series_fit_run5645.json",
-        "pulse_series_fit_run5646.json",
-        "pulse_series_fit_run5647.json"
+        "pulse_series_fit_run5715.hdf5",
+        "pulse_series_fit_run5714.hdf5",
+    ]
+    """files = [
+        "pulse_series_fit_run5724.hdf5",
+        "pulse_series_fit_run5725.hdf5",
+    ]"""
+    files = [
+        "pulse_series_fit_run5744.hdf5",
+        "pulse_series_fit_run5743.hdf5",
     ]
 
+
     charge_data =[]
+    mon_data = []
 
     for filename in files:
-        data = get_data(os.path.join(root, filename))
+        print("    running for {}".format(filename))
+        data, mon = get_data(os.path.join(root, filename))
         charge_data.append(data)
+        mon_data.append(mon)
 
-    make_plots(charge_data)
+    make_plots(charge_data, mon_data)
 
 
 if __name__=="__main__":

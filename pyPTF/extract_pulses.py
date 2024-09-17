@@ -73,14 +73,14 @@ def root_to_hdf5(root_file_path, hdf5_file_path):
                         print("branch", branch_name)
                         #group = hdf5_file.create_group(branch_name)
                         channel = branch_name[-1]
-                        if channel!="0" and channel!="2":
-                            continue
+                        #if channel!="2":
+                        #    continue
                         test = tree[branch_name].array(library='np')
                         
                         parse_waveform(test, branch_name)
                         del test
                         continue
-                    elif branch_name=="phidg0_tilt":
+                    elif branch_name=="phidg0_tilt" or branch_name=="phidg0_Btot":
                         branch_data = np.array([np.mean(entry) for entry in tree[branch_name].array(library="np")])
                         out_file.create_dataset(branch_name, data=branch_data)
                     elif any([test in branch_name.lower() for test in skip_keys]):
@@ -102,7 +102,7 @@ def reconstruct_json_as_dict(data):
 
     keys = [
         "x","y","z","tilt","rot",
-        "amplitudes","sigmas","means","peds"
+        "amplitudes","sigmas","means","peds"    
     ]
 
     outdata = {
@@ -123,6 +123,7 @@ def reconstruct_json_as_dict(data):
 
             outdata[pmt]["amplitudes"]+= data[pmt][scanpoint]["amplitudes"]
             outdata[pmt]["sigmas"] += data[pmt][scanpoint]["sigmas"]
+            
 
     return outdata
 
@@ -147,6 +148,11 @@ def analyze_waveforms(run_number):
         data[key] = np.array(__raw_meta_data[key][:])
     __raw_meta_data.close()
 
+    timing_data = process_into_fitseries(
+        meta_data=data, 
+        which_pmt=PMT.Timing_NotAPMT
+    )
+
     # this thing kinda does most of the magic
     main_fitseries = process_into_fitseries(
             meta_data=data,
@@ -159,6 +165,8 @@ def analyze_waveforms(run_number):
         which_pmt=PMT.PTF_Monitor_PMT,
     )
     
+
+
     out_file = os.path.join(
         DATA_FOLDER,
         "pulse_series_fit_run{}.hdf5".format(run_number)
@@ -167,12 +175,13 @@ def analyze_waveforms(run_number):
     out_data = {
         "pmt0":main_fitseries,
         "monitor":secondary_fitseries,
+        "timing_data":timing_data,
         "data_folder" : data["data_folder"],
         "run_no":run_number
     }
     print("saving hdf5 file")
     _obj = h5.File(out_file, 'w')
-    for pmt_key in ["pmt0", "monitor"]:
+    for pmt_key in ["pmt0", "monitor", "timing_data"]:
         for key in out_data[pmt_key].keys():
             _obj.create_dataset("{}/{}".format(pmt_key, key), data=out_data[pmt_key][key])
     _obj.create_dataset("run_no", data=out_data["run_no"])

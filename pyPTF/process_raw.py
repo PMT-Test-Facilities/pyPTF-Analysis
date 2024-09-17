@@ -64,6 +64,8 @@ def FFT_cut(waveform:np.ndarray)->bool:
         plt.show()
     return good
 
+
+
 def get_charge_sum(waveform, bin_low=0, bin_high=0):
     """
         Determines the pedestal first, then the `Qsum` charge sum of the waveform over
@@ -85,8 +87,6 @@ def get_charge_sum(waveform, bin_low=0, bin_high=0):
     
     return pedestal, qsum
 
-
-
 def process_into_fitseries(meta_data:dict, which_pmt):
     """
         Takes a dictionary of run information and the desired PMT. 
@@ -94,6 +94,8 @@ def process_into_fitseries(meta_data:dict, which_pmt):
     """
 
     channel = get_PMT_channel(which_pmt)
+    dummy = channel==1
+
     waveform_file = os.path.join(
         meta_data["data_folder"],
         "convert_V1730_wave{}.h5".format(channel))
@@ -103,11 +105,17 @@ def process_into_fitseries(meta_data:dict, which_pmt):
     # go over the scan spots
     count = 0
 
-    keys = [
-        "x","y","z","tilt","rot",
-        "amplitudes","sigmas","means","peds",
-        "n_pass", "pulse_times", "passing"
-    ]
+    if dummy:
+        keys = ["pulse_times","x","y","z","tilt","rot", "passing", "bfield"]
+    else:
+
+        keys = [
+            "x","y","z","tilt","rot",
+            "amplitudes","sigmas","means","peds",
+            "n_pass", "pulse_times", "passing",
+            "bfield"
+        ]
+
     outdata = {key:[] for key in keys}
     
 
@@ -130,24 +138,30 @@ def process_into_fitseries(meta_data:dict, which_pmt):
         )
 
         #print(keyname)
-        
-        # extract waveform values 
-        this_ps.extract_values(these_waveforms)
+        if dummy:
+            this_ps.extract_timing_signal(these_waveforms)
+        else:
+            # extract waveform values 
+            this_ps.extract_values(these_waveforms)
 
-        outdata["passing"]+=this_ps.passing
         outdata["x"]+=[meta_data["gantry0_x"][i],]*len(this_ps)
         outdata["y"]+=[meta_data["gantry0_y"][i],]*len(this_ps)
         outdata["z"]+=[meta_data["gantry0_z"][i],]*len(this_ps)
         outdata["rot"]+=[meta_data["gantry0_rot"][i],]*len(this_ps)
         outdata["tilt"]+=[meta_data["phidg0_tilt"][i],]*len(this_ps)
-        outdata["amplitudes"]+= this_ps.amplitudes
-        outdata["sigmas"]+=this_ps.sigmas
-        outdata["means"]+=this_ps.means
+        outdata["bfield"]+=[meta_data["phidg0_Btot"][i],]*len(this_ps)
         outdata["pulse_times"] += this_ps.pulse_times
-        if len(this_ps)!=0:
-            outdata["n_pass"] +=[this_ps.pass_fract/len(this_ps), ]*len(this_ps)
-        else:
-            outdata["n_pass"] +=[0, ]*len(this_ps)
+        outdata["passing"]+=this_ps.passing
+
+        if not dummy:
+            outdata["amplitudes"]+= this_ps.amplitudes
+            outdata["sigmas"]+=this_ps.sigmas
+            outdata["means"]+=this_ps.means
+            
+            if len(this_ps)!=0:
+                outdata["n_pass"] +=[this_ps.pass_fract/len(this_ps), ]*len(this_ps)
+            else:
+                outdata["n_pass"] +=[0, ]*len(this_ps)
 
             
             
