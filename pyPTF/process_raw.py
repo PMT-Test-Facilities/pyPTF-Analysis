@@ -106,14 +106,14 @@ def process_into_fitseries(meta_data:dict, which_pmt):
     count = 0
 
     if dummy:
-        keys = ["pulse_times","x","y","z","tilt","rot", "passing", "bfield"]
+        keys = ["pulse_times","x","y","z","tilt","rot", "passing", ]
     else:
 
         keys = [
             "x","y","z","tilt","rot",
             "amplitudes","sigmas","means","peds",
             "n_pass", "pulse_times", "passing",
-            "bfield"
+            "bfield", "charge_sum"
         ]
 
     outdata = {key:[] for key in keys}
@@ -149,13 +149,15 @@ def process_into_fitseries(meta_data:dict, which_pmt):
         outdata["z"]+=[meta_data["gantry0_z"][i],]*len(this_ps)
         outdata["rot"]+=[meta_data["gantry0_rot"][i],]*len(this_ps)
         outdata["tilt"]+=[meta_data["phidg0_tilt"][i],]*len(this_ps)
-        outdata["bfield"]+=[meta_data["phidg0_Btot"][i],]*len(this_ps)
+        
         outdata["pulse_times"] += this_ps.pulse_times
         outdata["passing"]+=this_ps.passing
 
         if not dummy:
             outdata["amplitudes"]+= this_ps.amplitudes
+            outdata["bfield"]+=[meta_data["phidg0_Btot"][i],]*len(this_ps)
             outdata["sigmas"]+=this_ps.sigmas
+            outdata["charge_sum"] += this_ps.charge_sum
             outdata["means"]+=this_ps.means
             
             if len(this_ps)!=0:
