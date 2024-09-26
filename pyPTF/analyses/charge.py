@@ -28,15 +28,14 @@ pmt_radius =0.508/2
 DEBUG = False
 RATIO = False
 
-CHARGE_BINNING = np.linspace(0, 1500, 400)
+CHARGE_BINNING = np.linspace(-500, 3000, 400)
 BIN_CENTERS = 0.5*(CHARGE_BINNING[:-1] + CHARGE_BINNING[1:])
 BIN_WIDTHS  = CHARGE_BINNING[1:] - CHARGE_BINNING[:-1]
 
 rtwo=sqrt(2)
 rpi = sqrt(2*pi)
 def get_analysis_charge(analysis, debug=False, just_height=False):
-
-    
+    return -1*np.array(analysis["charge_sum"][:])/PTF_SCALE
     amplitude = np.array(analysis["amplitudes"][:])
     
     if just_height:
@@ -244,9 +243,11 @@ def process_analysis(data_dict:dict, is_monitor=False):
     y_centers = 0.5*(y_edges[:-1] + y_edges[1:])
 
     print("binning charges")
+    counts = np.histogram2d(xs, ys, bins=(x_edges,y_edges))[0]
     det_eff = np.histogram2d(xs, ys, bins=(x_edges,y_edges), weights=data_dict["n_pass"])[0]
+    avg_charge = np.histogram2d(xs, ys, bins=(x_edges,y_edges), weights=data_dict["charge_sum"])[0]/counts
 
-    bfield = np.histogram2d(xs, ys, bins=(x_edges,y_edges), weights=data_dict["bfield"])[0]/np.histogram2d(xs, ys, bins=(x_edges,y_edges))[0]
+    bfield = np.histogram2d(xs, ys, bins=(x_edges,y_edges), weights=data_dict["bfield"])[0]/counts
 
     results = {
         "avg_charge":np.zeros((n_x,n_y)),
@@ -279,7 +280,7 @@ def process_analysis(data_dict:dict, is_monitor=False):
                 plt.show()
                 plt.clf()
 
-            results["avg_charge"][ix][jy] = np.mean(binned_charges[ix][jy])
+            results["avg_charge"][ix][jy] = avg_charge[ix][jy]
             #results["Q_1"][ix][jy] = results["avg_charge"][ix][jy]*det_eff[ix][jy]
 
             results["Q_1"][ix][jy] = q1_fit[1]
@@ -342,9 +343,9 @@ def main_new(filename):
         "Sigma_1":[0,700],
         "mu":[0,0.5],
         "hq1pemu":[0,500],
-        #"avg_charge":[0,0.15],
+        "avg_charge":[-0.05, 0.05],
         "det_eff":[0., 0.5],
-        "bfield":[0, 0.4]
+        "bfield":[0, 0.6]
     }
 
     bounds = ratio_bonds if RATIO else bounds_dict
@@ -352,6 +353,7 @@ def main_new(filename):
     title_keys = {key:key for key in pmt_20in_res.keys()}
     title_keys["Q_1"] = r"$Q_{1}$ Gain"
     title_keys["det_eff"] = "Detection Efficiency"
+    title_keys["avg_charge"] = "Avg. Charge"
 
     for key in pmt_20in_res.keys():
         if key in skip_keys:
@@ -377,11 +379,16 @@ def main_new(filename):
 
                     plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(ratio[key]), cmap='inferno', vmin=bounds[key][0], vmax=bounds[key][1])
                 elif key in bounds_dict:
-                    ratio[key][np.logical_not(exclude).T] = None
-                    plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(ratio[key]), vmin=bounds[key][0], vmax=bounds[key][1], cmap='inferno')
+                    if key!="avg_charge" and key!="bfield":
+                        ratio[key][np.logical_not(exclude).T] = None
+                        cmap = "inferno"
+                    else:
+                        cmap ="RdBu"
+                    plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(ratio[key]), vmin=bounds[key][0], vmax=bounds[key][1], cmap=cmap)
                 else:    
-                    ratio[key][np.logical_not(exclude).T] = None
-                    plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(ratio[key]), cmap='inferno', vmin=-1, vmax=5)
+                    if key!="avg_charge":
+                        ratio[key][np.logical_not(exclude).T] = None
+                    plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(ratio[key]), cmap='inferno') #, vmin=-1, vmax=5)
         else:
             plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(ratio[key]))
         cbar = plt.colorbar()
@@ -396,15 +403,15 @@ def main_new(filename):
         plt.savefig(os.path.join(os.path.dirname(__file__), "plots", "{}_{}.png".format(key,run_no)), dpi=400)
 
     plt.clf() 
-    plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(monitor["det_eff"]), cmap='inferno', vmin=bounds["det_eff"][0], vmax=bounds["det_eff"][1])
-    print("{} - {}".format(np.mean(monitor["det_eff"]), np.std(monitor["det_eff"])))
+    plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(monitor["avg_charge"]), cmap='RdBu', vmin=-0.02,vmax=0.02)
+    print("{} - {}".format(np.mean(monitor["avg_charge"]), np.std(monitor["avg_charge"])))
     plt.xlabel("X [m]",size=14)
     plt.ylabel("Y [m]",size=14)
     plt.gca().set_aspect('equal')
-    plt.title(title_keys["det_eff"], size=14)
+    plt.title(title_keys["avg_charge"], size=14)
     cbar = plt.colorbar()
     cbar.set_label("Monitor")
-    plt.savefig(os.path.join(os.path.dirname(__file__), "plots", "{}_{}_monitor.png".format("det_eff",run_no)), dpi=400)
+    plt.savefig(os.path.join(os.path.dirname(__file__), "plots", "{}_{}_monitor.png".format("avg_charge",run_no)), dpi=400)
 
 def main(filename):
     if not os.path.exists(filename):
