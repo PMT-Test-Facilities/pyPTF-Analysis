@@ -15,8 +15,6 @@ from scipy.interpolate import griddata, RectBivariateSpline
 import numpy as np 
 from math import log10,sqrt 
 
-
-KEEP_ALL = True
 DEBUG  = True
 
 pmt_x = 0.417
@@ -87,6 +85,8 @@ class PointScan:
         self._widths = []
         self._peds = []
         self._means = []
+        self._pp_pass = []
+        self._np_pass = []
         self._pulse_times = None
         self._npass = 0
 
@@ -94,6 +94,13 @@ class PointScan:
     @property
     def passing(self):
         return self._passing.tolist()
+    @property
+    def np_pass(self):
+        return self._np_pass
+    @property
+    def pp_pass(self):
+        return self._pp_pass
+    
     @property
     def pulse_times(self):
         return self._pulse_times.tolist()
@@ -259,12 +266,8 @@ class PointScan:
         self._charges = np.sum(waveform, axis=1) - self._peds*len(waveform[0])
 
         amplitude_cut = self._amplitudes > 30
-
-        #all_pass = np.logical_and(time_cut, amplitude_cut)
-        if KEEP_ALL:
-            all_pass = np.logical_not(np.isnan(self._amplitudes))
-        else:
-            all_pass = amplitude_cut
+        pamp_cut = self._amplitudes > 35
+        namp_cut = self._amplitudes > 25
 
         # we need the indices of the peaks in the flattened coordinates 
         # so the `range` part is used as an offset 
@@ -284,31 +287,36 @@ class PointScan:
         # to determine the pulse shape at a much more granular scale 
         # 49 -60 for monitor 
         # 23-45 for pmt0
-        if  True:
-            if self._which_pmt==PMT.Hamamatsu_R3600_PMT.value:
-                passing = np.logical_and(amplitude_cut, self._means > 270*PTF_SAMPLE_WIDTH)
-                passing = np.logical_and(passing, self._means < 291*PTF_SAMPLE_WIDTH)
-            elif self._which_pmt==PMT.PTF_Monitor_PMT.value:
-                passing = np.logical_and(amplitude_cut, self._means > 49*PTF_SAMPLE_WIDTH)
-                passing = np.logical_and(passing, self._means < 60*PTF_SAMPLE_WIDTH)
-            else:
-                passing = np.logical_and(amplitude_cut, self._means > 150)
-                passing = np.logical_and(passing, self._means < 225)
-        passing = amplitude_cut
-
         if self._which_pmt==PMT.Hamamatsu_R3600_PMT.value:
+            # 270 291
+            min_cut = 110
+            max_cut  = 130
+        elif self._which_pmt==PMT.PTF_Monitor_PMT.value:
+            # 60, 49
+            min_cut  = 105
+            max_cut = 120
+        else:
+            min_cut  = 100
+            max_cut = 140
+
+        t_cut = np.logical_and(self._means > min_cut, self._means<max_cut)
+        passing = np.logical_and(amplitude_cut, t_cut)
+        plpass = np.logical_and(pamp_cut, t_cut)
+        napass = np.logical_and(namp_cut, t_cut)
+
+        if True : #self._which_pmt==PMT.Hamamatsu_R3600_PMT.value:
             rescale_amt = 8 # scale factor for granularity 
             super_TS = np.linspace(min(PTF_TS), max(PTF_TS), rescale_amt*len(PTF_TS), endpoint=True)
-            amp_mesh, time_mesh = np.meshgrid(self._amplitudes, super_TS)
-            mean_mesh, time_mesh = np.meshgrid(self._means, super_TS)
-            width_mesh, time_mesh = np.meshgrid(self._widths, super_TS)
-            fits = np.transpose(amp_mesh*np.exp(-0.5*((time_mesh - mean_mesh)/(width_mesh))**2 ))
+            #amp_mesh, time_mesh = np.meshgrid(self._amplitudes, super_TS)
+            #mean_mesh, time_mesh = np.meshgrid(self._means, super_TS)
+            #width_mesh, time_mesh = np.meshgrid(self._widths, super_TS)
+            #fits = np.transpose(amp_mesh*np.exp(-0.5*((time_mesh - mean_mesh)/(width_mesh))**2 ))
                     
             # without this, spurious signals poke through
-            fits[np.logical_not(passing)]*=0
+            #fits[np.logical_not(passing)]*=0
             waveform[np.logical_not(passing)]*=0
             idxs = []
-            for it, this_fit in enumerate(fits):
+            for it, this_fit in enumerate(waveform):
                 
 
                 #these_cross =  np.argwhere(np.diff(np.sign(this_fit - 30))).flatten().tolist()
@@ -322,14 +330,15 @@ class PointScan:
             #self._pulse_times = np.array(super_TS[idxs])
             self._pulse_times = np.array(PTF_TS[idxs])
         else:
-            self._pulse_times = self._means[all_pass]
+            self._pulse_times = self._means
         
-
+        self._np_pass = np.sum(napass.astype(int))/len(napass) 
+        self._pp_pass = np.sum(plpass.astype(int))/len(plpass) 
         self._charges = self._charges*PTF_SCALE
-        self._amplitudes = self._amplitudes[all_pass]*PTF_SCALE
-        self._means = self._means[all_pass]
-        self._widths = self._widths[all_pass]
-        self._peds = self._peds[all_pass]*PTF_SCALE
+        self._amplitudes = self._amplitudes*PTF_SCALE
+        self._means = self._means
+        self._widths = self._widths
+        self._peds = self._peds*PTF_SCALE
         self._npass = np.sum(passing.astype(int))/len(passing)
         self._passing = passing
         #print("({:.3f},{:.3f}) - {}".format(self._x, self._y, len(self._amplitudes)))
@@ -354,7 +363,7 @@ def make_bin_edges(series):
         return np.array([sorted_values[0]-0.1, sorted_values[0]+0.1])
 
     width = sorted_values[1] - sorted_values[0]
-    return np.arange(sorted_values[0] - 0.5*width, sorted_values[-1] + 0.5*width, width)
+    return np.arange(sorted_values[0] - 0.5*width, sorted_values[-1] + 1.52*width, width)
     return np.linspace(sorted_values[0] - 0.5*width, sorted_values[-2] + 0.5*width, len(sorted_values)+1)
 
 def get_loc(x:float, domain:list,closest=False):
