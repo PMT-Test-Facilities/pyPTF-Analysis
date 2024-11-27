@@ -28,14 +28,14 @@ pmt_radius =0.508/2
 DEBUG = False
 RATIO = False
 
-CHARGE_BINNING = np.linspace(-500, 3000, 400)
+CHARGE_BINNING = np.linspace(0, 1500, 800)
 BIN_CENTERS = 0.5*(CHARGE_BINNING[:-1] + CHARGE_BINNING[1:])
 BIN_WIDTHS  = CHARGE_BINNING[1:] - CHARGE_BINNING[:-1]
 
 rtwo=sqrt(2)
 rpi = sqrt(2*pi)
 def get_analysis_charge(analysis, debug=False, just_height=False):
-    return -1*np.array(analysis["charge_sum"][:])/PTF_SCALE
+    #return -1*np.array(analysis["charge_sum"][:])/PTF_SCALE
     amplitude = np.array(analysis["amplitudes"][:])
     
     if just_height:
@@ -44,7 +44,7 @@ def get_analysis_charge(analysis, debug=False, just_height=False):
     if debug:
         plt.clf()
         plt.hist(amplitude/PTF_SCALE, bins=np.linspace(0, 600, 100))
-        plt.xlabel("Pulse Height [ADC]",size=14)
+        plt.xlabel("Charge [ADC]",size=14)
         plt.ylabel("Counts",size=14)
         plt.yscale('log')
         plt.savefig("pulse_height.png",dpi=400)
@@ -144,6 +144,108 @@ def fit_gaussian(xs, data, x0, bounds, func=gaus):
     result = minimize(callf, x0, bounds=bounds,options=options)
     return result.x # norm, 
 
+def fit_bellamy(x, params):
+        """
+            0 - w 
+            1 - sigma 0
+            2 - Q0
+            3 - alpha 
+            4 - mu 
+            5 - sigma1 
+            6 - q1 
+            7 - norm
+            8 - underamplification 
+
+        """
+        
+        w = params[0]
+        sigma0 = 10**params[1] 
+        q0 =  params[2]
+        alpha = 10**params[3]
+        mu = params[4]
+        sigma1 = 10**params[5]
+        q1= params[6]
+        norm = params[7]
+        underamp_x = params[8]
+        underamp_sig = params[9]
+        underamp_amp = params[10]
+        
+
+        retval = w*alpha*np.exp(-alpha*x)
+        retval+=(1-w)*( np.exp(-0.5*((x-q0)/sigma0)**2) + alpha*np.exp(-alpha*(x-q0)))*np.exp(-mu)
+        for _i in range(3):
+            n = _i+1
+            sigman = sqrt(n)*sigma1 
+            qn = n*q1
+
+            gauss= sqrt(2/pi)/(sigman*(1 + erf(qn/(sqrt(2)*sigman))))
+            gauss_main=gauss*np.exp(-((x-qn)/(sqrt(2)*sigman))**2 )
+
+            retval += w*(mu**n)*np.exp(-mu)*gauss_main/gamma(1+n)
+
+        return retval*norm #+ underamp_amp*np.exp(-0.5*((underamp_x - x)/underamp_sig)**2)
+
+def charge_fit_bellamy(data, bin_centers):
+    
+    
+    def poisson_llh(x, y, params, function=_fitfun):
+        """
+        Poisson likelihood function
+        Metric used is -log-likelihood 
+        """
+
+
+        exp = function(x, params)
+        metric= 0.5*(np.log10(exp) - np.log10(y))**2
+
+        #metric[np.isnan(metric)] = 1e10
+    #  
+        metric = -1*(y*np.log(exp) - exp - loggamma(y+1))
+        #metric[np.isnan(metric)] = 1e5
+        #metric[np.isinf(metric)] = 1e5
+        return np.sum(metric) 
+    
+    """    x0 = [
+        0.5, # w
+        9, # sigma0
+        0.9,  #Q0
+        -3.812, # alpha
+        -3.213e-2, # mu 
+        1.2, # sigma1
+        600, # Q1     
+        np.sum(data),# scale 
+        0.2,
+        0.1
+    ]"""
+
+    x0 = [0.5,  1.02119177e+01,  3.78131765e-01, -1.39201042e+00,
+        7.80014926e-01,  2.45973207e+00,  5.29935686e+02,  9.28514982e+05, 126, 10, 95]
+    bounds = [
+        (0, 1), # w
+        (-15,15), # sigma0 
+        (-50, 50 ), # Q0 
+        (-15,0), # alpha 
+        (0, 1200), # mu 
+        (-10, 15), # sigma1
+        (250, 2000) , #Q1 
+        (0, np.inf),
+        (0.0001, 200),# underamp charge 
+        (0.0001, 200), # underamp width 
+        (0, np.inf) # underamp height
+    ]
+
+    options = {
+        "gtol":1e-20,
+        "ftol":1e-20,
+        "eps":1e-6
+    }
+
+    def call_check(params):
+        return poisson_llh(bin_centers, data, params, fit_bellamy) 
+
+    min_res = basinhopping(call_check , x0, minimizer_kwargs={"bounds":bounds, "options":options}, niter=1)
+
+    return min_res.x
 
 def fit_binned_data(data, bin_centers=BIN_CENTERS, monitor=False):
     """
@@ -221,7 +323,8 @@ def process_analysis(data_dict:dict, is_monitor=False):
 
     amps =np.array(data_dict['amplitudes'])/PTF_SCALE
     sigs = np.array(data_dict["sigmas"])/PTF_SCALE
-
+    height_bins = np.linspace(0,200, 201)
+    
     if is_monitor:
         charge_bins = np.linspace(0, 1000, len(CHARGE_BINNING))
     else:
@@ -234,7 +337,7 @@ def process_analysis(data_dict:dict, is_monitor=False):
         sample, bins=(x_edges, y_edges, charge_bins)
     )[0]
 
-    amp_bins = np.linspace(0,160,20)
+    amp_bins = np.linspace(0,200,201)
     binned_amps = np.histogramdd(
         np.transpose([xs,ys,amps]), bins=(x_edges, y_edges,amp_bins)
     )[0]
@@ -243,9 +346,19 @@ def process_analysis(data_dict:dict, is_monitor=False):
     y_centers = 0.5*(y_edges[:-1] + y_edges[1:])
 
     print("binning charges")
-    counts = np.histogram2d(xs, ys, bins=(x_edges,y_edges))[0]
+    
+    
     det_eff = np.histogram2d(xs, ys, bins=(x_edges,y_edges), weights=data_dict["n_pass"])[0]
-    avg_charge = np.histogram2d(xs, ys, bins=(x_edges,y_edges), weights=data_dict["charge_sum"])[0]/counts
+
+    #error = np.histogram2d(xs, ys, bins=(x_edges,y_edges), weights=data_dict["pp_pass"])[0] - np.histogram2d(xs, ys, bins=(x_edges,y_edges), weights=data_dict["np_pass"])[0]
+    #error /= 10
+    #error /= det_eff
+    keep = np.array(data_dict["passing"])
+    charge_pass = np.array(data_dict["charge_sum"])[keep]
+    counts = np.histogram2d(xs, ys, bins=(x_edges,y_edges))[0]
+    kcounts = np.histogram2d(xs[keep], ys[keep], bins=(x_edges,y_edges))[0]
+    avg_charge = np.histogram2d(xs, ys, bins=(x_edges,y_edges), weights=-1*np.array(data_dict["charge_sum"])/PTF_SCALE)[0]/counts
+    gain = np.histogram2d(xs[keep], ys[keep], bins=(x_edges,y_edges), weights=-1*charge_pass/PTF_SCALE)[0]/kcounts
 
     bfield = np.histogram2d(xs, ys, bins=(x_edges,y_edges), weights=data_dict["bfield"])[0]/counts
 
@@ -257,39 +370,49 @@ def process_analysis(data_dict:dict, is_monitor=False):
         "det_eff":np.zeros((n_x,n_y)),
         "bfield":np.zeros((n_x,n_y)),
         "hq1pemu":np.zeros((n_x,n_y)),
+        "error":np.zeros((n_x, n_y)),
         "xs":x_edges,
         "ys":y_edges
     }
-
+    plt.clf()
     for ix in tqdm(range(n_x)):
         for jy in range(n_y):
             #fitparams = np.zeros(8)
             fitped, q1_fit = fit_binned_data(binned_charges[ix][jy]/charge_bin_widths, charge_bin_centers, is_monitor)
-            if DEBUG and abs(x_centers[ix]-0.5)<5e-3 and abs(y_centers[jy]-0.3)<5e-3:
-                print(fitped)
-                print(q1_fit)
-                plt.title("Amplitude Distribution")
-                plt.clf()
+            if DEBUG and ((abs(x_centers[ix]-0.4)<5e-3 and abs(y_centers[jy]-0.275)<1e-2) or (abs(x_centers[ix]-0.2)<5e-3 and abs(y_centers[jy]-0.275)<1e-2) or (abs(x_centers[ix]-0.45)<5e-3 and abs(y_centers[jy]-0.275)<1e-2)):
+                center = abs(x_centers[ix]-0.4)<5e-3 and abs(y_centers[jy]-0.275)<1e-2
+                edge = abs(x_centers[ix]-0.2)<5e-3 and abs(y_centers[jy]-0.275)<1e-2
+            
+
+                plt.title("Charge Distribution")
                 #plt.stairs(binned_charges[ix][jy]/charge_bin_widths, charge_bins)
-                plt.stairs(binned_amps[ix][jy], amp_bins)
+                color = "blue" if center else "orange"
+                if not (center or edge):
+                    color="green"
+                plt.stairs(binned_charges[ix][jy], CHARGE_BINNING, color=color)
                 #plt.plot(charge_bin_centers, gaus(charge_bin_centers, q1_fit) +gaus_mu(charge_bin_centers, fitped))
-                plt.xlabel("Pulse Height [ADC]", size=14)
-                plt.ylabel(r"Counts", size=14)
+                plt.xlabel("Charge [ADC]", size=14)
+                plt.ylabel("Arb. Un", size=14)
                 plt.yscale('log')
-                plt.savefig("amp_dist.png",dpi=400)
-                plt.show()
-                plt.clf()
+            
 
             results["avg_charge"][ix][jy] = avg_charge[ix][jy]
             #results["Q_1"][ix][jy] = results["avg_charge"][ix][jy]*det_eff[ix][jy]
 
-            results["Q_1"][ix][jy] = q1_fit[1]
+            results["Q_1"][ix][jy] = gain[ix][jy]
             results["Sigma_1"][ix][jy] = q1_fit[2]
             #results["mu"][ix][jy] = 10**fitparams[4]
             
-
             results["hq1pemu"][ix][jy] = q1_fit[1]*results["mu"][ix][jy]
-
+    if DEBUG:
+        plt.plot( [], [],color="orange", label="Edge")
+        plt.plot([], [],color="blue", label="Center")
+        plt.plot([], [],color="green", label="Right")
+        plt.legend()
+        plt.savefig("amp_dist_{}.png".format( "mon" if is_monitor else "20in"),dpi=400)
+        plt.show()
+        plt.clf()
+    #results["error"] = error
     results["det_eff"] = det_eff
     results["mu"]=-1*np.log(1-results["det_eff"])
     results["bfield"] = bfield
@@ -306,7 +429,9 @@ def main_new(filename):
     run_no = np.int64(data["run_no"])
     monitor = process_analysis(data["monitor"], True)
     pmt_20in_res = process_analysis(data["pmt0"])
-    
+    if not os.path.exists(os.path.join(os.path.dirname(__file__), "plots","{}".format(run_no))):
+        os.mkdir(os.path.join(os.path.dirname(__file__),"plots","{}".format(run_no)))
+
 
     #monitor_res = process_analysis(data["ptfanalysis02"]) 
 
@@ -339,21 +464,23 @@ def main_new(filename):
     }
 
     bounds_dict={
-        "Q_1":[0,850],
+        "Q_1":[0,900],
         "Sigma_1":[0,700],
         "mu":[0,0.5],
         "hq1pemu":[0,500],
-        "avg_charge":[-0.05, 0.05],
+        "avg_charge":[0, 600],
         "det_eff":[0., 0.5],
-        "bfield":[0, 0.6]
+        "bfield":[0, 1.1],
+        "error":[-0.01 , 0.01]
     }
 
     bounds = ratio_bonds if RATIO else bounds_dict
 
     title_keys = {key:key for key in pmt_20in_res.keys()}
-    title_keys["Q_1"] = r"$Q_{1}$ Gain"
+    title_keys["Q_1"] = r"$Q_{1}$ Gain [ADC]"
     title_keys["det_eff"] = "Detection Efficiency"
-    title_keys["avg_charge"] = "Avg. Charge"
+    title_keys["avg_charge"] = "Avg. Charge [ADC]"
+    title_keys["error"]=r"d$\delta$/dADC"
 
     for key in pmt_20in_res.keys():
         if key in skip_keys:
@@ -373,21 +500,26 @@ def main_new(filename):
         
 
         if True:
+                ratio[key][np.logical_not(exclude).T] = None
                 if  key=="det_eff":
                     print("Mean Detection: {}".format(np.mean(ratio[key][exclude.T])))
                     absorb = abs_prob(get_centers(pmt_20in_res["xs"]), get_centers(pmt_20in_res["ys"]))
 
                     plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(ratio[key]), cmap='inferno', vmin=bounds[key][0], vmax=bounds[key][1])
+                
                 elif key in bounds_dict:
-                    if key!="avg_charge" and key!="bfield":
+                    if  key!="bfield" and key!="avg_charge":
                         ratio[key][np.logical_not(exclude).T] = None
                         cmap = "inferno"
                     else:
                         cmap ="RdBu"
+                    if key=="error":
+                        cmap="RdBu"
+                    if key=="avg_charge":
+                        cmap="inferno"
                     plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(ratio[key]), vmin=bounds[key][0], vmax=bounds[key][1], cmap=cmap)
                 else:    
-                    if key!="avg_charge":
-                        ratio[key][np.logical_not(exclude).T] = None
+                    
                     plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(ratio[key]), cmap='inferno') #, vmin=-1, vmax=5)
         else:
             plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(ratio[key]))
@@ -395,23 +527,34 @@ def main_new(filename):
         if RATIO:
             cbar.set_label("20in/Monitor")
         else:
-            cbar.set_label("20in PMT")
+            cbar.set_label("20in {}".format(title_keys[key]))
         plt.xlabel("X [m]",size=14)
         plt.ylabel("Y [m]",size=14)
         plt.gca().set_aspect('equal')
         plt.title(title_keys[key], size=14)
-        plt.savefig(os.path.join(os.path.dirname(__file__), "plots", "{}_{}.png".format(key,run_no)), dpi=400)
+        plt.savefig(os.path.join(os.path.dirname(__file__), "plots", "{}".format(run_no),"{}_{}.png".format(key,run_no)), dpi=400)
 
     plt.clf() 
-    plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(monitor["avg_charge"]), cmap='RdBu', vmin=-0.02,vmax=0.02)
-    print("{} - {}".format(np.mean(monitor["avg_charge"]), np.std(monitor["avg_charge"])))
+    plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(monitor["avg_charge"]), cmap='inferno', vmin=0, vmax=300)
+    print("{} - {}".format(np.mean(monitor["det_eff"]), np.std(monitor["det_eff"])))
     plt.xlabel("X [m]",size=14)
     plt.ylabel("Y [m]",size=14)
     plt.gca().set_aspect('equal')
     plt.title(title_keys["avg_charge"], size=14)
     cbar = plt.colorbar()
     cbar.set_label("Monitor")
-    plt.savefig(os.path.join(os.path.dirname(__file__), "plots", "{}_{}_monitor.png".format("avg_charge",run_no)), dpi=400)
+    plt.savefig(os.path.join(os.path.dirname(__file__), "plots", "{}".format(run_no),"{}_{}_monitor.png".format("avg_charge",run_no)), dpi=400)
+
+    plt.clf() 
+    plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(monitor["error"]), cmap='RdBu', vmin=-0.01, vmax=0.01)
+    print("{} - {}".format(np.mean(monitor["error"]), np.std(monitor["error"])))
+    plt.xlabel("X [m]",size=14)
+    plt.ylabel("Y [m]",size=14)
+    plt.gca().set_aspect('equal')
+    plt.title(title_keys["error"], size=14)
+    cbar = plt.colorbar()
+    cbar.set_label("Monitor")
+    plt.savefig(os.path.join(os.path.dirname(__file__), "plots", "{}".format(run_no),"{}_{}_monitor.png".format("error",run_no)), dpi=400)
 
 def main(filename):
     if not os.path.exists(filename):
@@ -421,6 +564,7 @@ def main(filename):
 
     print("... loading ")
     data_dict = h5.File(filename, 'r')
+    run_no = np.int64(data_dict["run_no"])
 
     charge = get_analysis_charge(data_dict["pmt0"])
 
@@ -447,7 +591,7 @@ def main(filename):
     #plt.yscale('log')
     plt.legend()
     
-    plt.savefig(os.path.join(os.path.dirname(__file__), "plots", "charge_dist_all_{}.png".format(np.int64(data_dict["run_no"]))))
+    plt.savefig(os.path.join(os.path.dirname(__file__), "plots","{}".format(run_no), "charge_dist_all_{}.png".format(np.int64(data_dict["run_no"]))))
     plt.show()
 
 if __name__=="__main__":
