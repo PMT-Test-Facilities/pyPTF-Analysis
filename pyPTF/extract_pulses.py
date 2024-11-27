@@ -67,6 +67,29 @@ def root_to_hdf5(root_file_path, hdf5_file_path):
                     "evt_timestamp"
                 ]
 
+                mean_key =[
+                    "phidg0_tilt",
+                    "phidg0_Btot",
+                    "I_coil1",
+                    "I_coil2",
+                    "I_coil3",
+                    "I_coil4",
+                    "I_coil5",
+                    "I_coil6",
+                    "U_coil1",
+                    "U_coil2",
+                    "U_coil3",
+                    "U_coil4",
+                    "U_coil5",
+                    "U_coil6",
+                    "U_receiver0",
+                    "U_monitor0",
+                    "I_receiver0",
+                    "I_monitor0",
+                    "phidg0_temperature",
+                    "phidg0_humidity"
+                ]
+
                 # Loop over the branches in the tree
                 for branch_name in tree.keys():
                     if "V1730" in str(branch_name):
@@ -80,7 +103,7 @@ def root_to_hdf5(root_file_path, hdf5_file_path):
                         parse_waveform(test, branch_name)
                         del test
                         continue
-                    elif branch_name=="phidg0_tilt" or branch_name=="phidg0_Btot":
+                    elif branch_name in mean_key:
                         branch_data = np.array([np.mean(entry) for entry in tree[branch_name].array(library="np")])
                         out_file.create_dataset(branch_name, data=branch_data)
                     elif any([test in branch_name.lower() for test in skip_keys]):
@@ -177,6 +200,7 @@ def analyze_waveforms(run_number):
         "monitor":secondary_fitseries,
         "timing_data":timing_data,
         "data_folder" : data["data_folder"],
+        "meta":data,
         "run_no":run_number
     }
     print("saving hdf5 file")
@@ -184,14 +208,18 @@ def analyze_waveforms(run_number):
     for pmt_key in ["pmt0", "monitor", "timing_data"]:
         for key in out_data[pmt_key].keys():
             _obj.create_dataset("{}/{}".format(pmt_key, key), data=out_data[pmt_key][key])
+    for key in data.keys():
+        _obj.create_dataset("meta/{}".format(key), data=data[key])
     _obj.create_dataset("run_no", data=out_data["run_no"])
     _obj.create_dataset("data_folder", data=out_data["data_folder"])
+    #_obj.create_dataset("meta", data=out_data["meta"])
     _obj.close()
 
     print("Cleaning up")
     if not KEEP_WAVEFORMS:
         os.remove(main_file)
         os.remove(os.path.join(DATA_FOLDER, "convert_V1730_wave0.h5"))
+        os.remove(os.path.join(DATA_FOLDER, "convert_V1730_wave1.h5"))
         os.remove(os.path.join(DATA_FOLDER, "convert_V1730_wave2.h5"))
 
 
@@ -212,5 +240,4 @@ if __name__=="__main__":
     
     print("... extracting root File")
     root_to_hdf5(sys.argv[1], outfile)
-
     analyze_waveforms(run_number)
