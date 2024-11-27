@@ -304,31 +304,31 @@ class PointScan:
         plpass = np.logical_and(pamp_cut, t_cut)
         napass = np.logical_and(namp_cut, t_cut)
 
-        if True : #self._which_pmt==PMT.Hamamatsu_R3600_PMT.value:
+        if self._which_pmt!=PMT.PTF_Monitor_PMT.value:
             rescale_amt = 8 # scale factor for granularity 
             super_TS = np.linspace(min(PTF_TS), max(PTF_TS), rescale_amt*len(PTF_TS), endpoint=True)
-            #amp_mesh, time_mesh = np.meshgrid(self._amplitudes, super_TS)
-            #mean_mesh, time_mesh = np.meshgrid(self._means, super_TS)
-            #width_mesh, time_mesh = np.meshgrid(self._widths, super_TS)
-            #fits = np.transpose(amp_mesh*np.exp(-0.5*((time_mesh - mean_mesh)/(width_mesh))**2 ))
+            amp_mesh, time_mesh = np.meshgrid(self._amplitudes, super_TS)
+            mean_mesh, time_mesh = np.meshgrid(self._means, super_TS)
+            width_mesh, time_mesh = np.meshgrid(self._widths, super_TS)
+            fits = np.transpose(amp_mesh*np.exp(-0.5*((time_mesh - mean_mesh)/(width_mesh))**2 ))
                     
             # without this, spurious signals poke through
-            #fits[np.logical_not(passing)]*=0
-            waveform[np.logical_not(passing)]*=0
+            fits[np.logical_not(passing)]*=0
+            #waveform[np.logical_not(passing)]*=0
             idxs = []
-            for it, this_fit in enumerate(waveform):
-                
 
-                #these_cross =  np.argwhere(np.diff(np.sign(this_fit - 30))).flatten().tolist()
-                these_cross = np.argwhere(np.diff(np.sign(self._peds[it] - waveform[it] - 30))).flatten().tolist()
+            # for it, this_fit in enumerate(waveforms):
+            for it, this_fit in enumerate(fits):
+                these_cross =  np.argwhere(np.diff(np.sign(this_fit - 30))).flatten().tolist()
+                #these_cross = np.argwhere(np.diff(np.sign(self._peds[it] - waveform[it] - 30))).flatten().tolist()
                 if len(these_cross)==2:
                     idxs+=[these_cross[0]]
                 else:
                     passing[it] = False
             # get where the fit pulses cross the threshold 
 
-            #self._pulse_times = np.array(super_TS[idxs])
-            self._pulse_times = np.array(PTF_TS[idxs])
+            self._pulse_times = np.array(super_TS[idxs])
+            #self._pulse_times = np.array(PTF_TS[idxs])
         else:
             self._pulse_times = self._means
         
@@ -363,7 +363,7 @@ def make_bin_edges(series):
         return np.array([sorted_values[0]-0.1, sorted_values[0]+0.1])
 
     width = sorted_values[1] - sorted_values[0]
-    return np.arange(sorted_values[0] - 0.5*width, sorted_values[-1] + 1.52*width, width)
+    return np.arange(sorted_values[0] - 0.5*width, sorted_values[-1] + 1.5*width, width)
     return np.linspace(sorted_values[0] - 0.5*width, sorted_values[-2] + 0.5*width, len(sorted_values)+1)
 
 def get_loc(x:float, domain:list,closest=False):
