@@ -22,15 +22,17 @@ pmt_radius =0.508/2
 
 
 fwhm_scaler= 2*sqrt(2*log(2))
-
+scaleup = 1
 TIME_EDGES = np.linspace(
-    min(PTF_TS)-0.5*PTF_SAMPLE_WIDTH, max(PTF_TS)+0.5*PTF_SAMPLE_WIDTH, len(PTF_TS)+1, endpoint=True
+    min(PTF_TS)-0.5*PTF_SAMPLE_WIDTH, 1.2*max(PTF_TS)+0.5*PTF_SAMPLE_WIDTH, scaleup*len(PTF_TS)+1, endpoint=True
 )
-TIME_EDGES = PTF_TS
-dif_bins = np.arange(130, 170, PTF_SAMPLE_WIDTH)
+#TIME_EDGES = PTF_TS
+dif_bins = np.arange(60,170,PTF_SAMPLE_WIDTH/scaleup)
 
 def extract_values(time_centers, tdiffs, fancy=False):
     index = np.argmax(tdiffs)
+
+
 
     fwhm = peak_widths(tdiffs, [index,])[0]*PTF_SAMPLE_WIDTH
     width = fwhm/fwhm_scaler
@@ -42,7 +44,7 @@ def extract_values(time_centers, tdiffs, fancy=False):
     x0 = [max(tdiffs), time_centers[index], width[0]]
     bounds = [
         (min(tdiffs), np.inf),
-        (100, 300),
+        (0, 300),
         (0.5, 15)
     ]
     res = minimize(metric, x0, bounds=bounds).x 
@@ -56,7 +58,7 @@ def extract_values(time_centers, tdiffs, fancy=False):
         plt.xlabel("Time [ns]", size=14)
         plt.ylabel("Counts", size=14)
         #plt.legend()
-        plt.show()
+        #plt.show()
 
     return res[1], res[2]
 
@@ -65,23 +67,20 @@ def main(filename):
     if not os.path.exists(filename):
         raise IOError("File not found {}".format(filename))
     
+    
+
     data_dict = h5.File(filename, 'r')
     run_no = np.int64(data_dict["run_no"])
+    if not os.path.exists(os.path.join(os.path.dirname(__file__), "plots","{}".format(run_no))):
+        os.mkdir(os.path.join(os.path.dirname(__file__), "plots","{}".format(run_no)))
 
-
-
-    main_mean =  np.array(data_dict["pmt0"]["means"])
 
     keep =  np.array(data_dict["pmt0"]["passing"])
-    
-    print(data_dict.keys())
     main_mean =  np.array(data_dict["pmt0"]["pulse_times"]) + 150 #  np.array(data_dict["pmt0"]["means"])[keep]
     monitor_mean = np.array(data_dict["timing_data"]["pulse_times"])[keep]
 
-    print(np.nanmean(main_mean))
-    print(np.nanmean(monitor_mean))
-    diff = main_mean - monitor_mean
-    print(np.mean(diff))
+    diff = main_mean - monitor_mean 
+    print("dif range {} - {}".format(diff.min(), diff.max()))
 
     histo_data = np.histogram(monitor_mean, TIME_EDGES)[0]
     main_histo_data = np.histogram(main_mean, TIME_EDGES)[0]
@@ -89,28 +88,29 @@ def main(filename):
     plt.stairs(histo_data, TIME_EDGES, alpha=1, color=get_color(1,3), label="Trigger")
     plt.stairs(main_histo_data,TIME_EDGES, alpha=1, color=get_color(2,3), label="20in")
     plt.legend()
-    plt.xlabel("Time [ns]", size=14)
+    plt.xlabel("Transit Time [ns]", size=14)
     plt.ylabel("Counts", size=14)
     plt.yscale('log')
     plt.tight_layout()
     
     plt.savefig(
-        os.path.join(os.path.dirname(__file__), "plots","time_dist{}.png".format(run_no)),
+        os.path.join(os.path.dirname(__file__), "plots","{}".format(run_no),"time_dist{}.png".format(run_no)),
         dpi=400
     )
-    plt.show()
+    #plt.show()
 
     plt.clf()
-
+    dif_bins =  np.arange(80, max(diff), 0.5)
+    print(" {} {}".format(min(diff), max(diff)))
     diff_histo = np.histogram(diff, dif_bins)[0]
     plt.stairs(diff_histo, dif_bins)
     plt.xlabel("Time [ns]", size=14)
     plt.ylabel("Counts", size=14)
     plt.title(r"$\tau_{20in}$", size=14)
-    #plt.yscale('log')
+    plt.yscale('log')
     plt.tight_layout()
     plt.savefig(
-        os.path.join(os.path.dirname(__file__), "plots","time_spread{}.png".format(run_no)),
+        os.path.join(os.path.dirname(__file__), "plots","{}".format(run_no),"time_spread{}.png".format(run_no)),
         dpi=400
     )
     #plt.show()
@@ -124,7 +124,6 @@ def main(filename):
 
     xs = np.array(data_dict["pmt0"]["x"])
     ys = np.array(data_dict["pmt0"]["y"])
-
 
     x_edges = make_bin_edges(xs)
     y_edges = make_bin_edges(ys)
@@ -148,7 +147,7 @@ def main(filename):
     plt.yscale('log')
     plt.tight_layout()
     plt.savefig(
-        os.path.join(os.path.dirname(__file__), "plots","facecut{}.png".format(run_no)),
+        os.path.join(os.path.dirname(__file__), "plots","{}".format(run_no),"facecut{}.png".format(run_no)),
         dpi=400
     )
     #plt.show()
@@ -163,7 +162,7 @@ def main(filename):
     plt.yscale('log')
     plt.tight_layout()
     plt.savefig(
-        os.path.join(os.path.dirname(__file__), "plots","facelesscut{}.png".format(run_no)),
+        os.path.join(os.path.dirname(__file__), "plots","{}".format(run_no),"facelesscut{}.png".format(run_no)),
         dpi=400
     )
     #plt.show()
@@ -197,10 +196,33 @@ def main(filename):
             tt, tts = extract_values(time_centers, binned_diffs[ix][jy], False)
             results["transit_time"][ix][jy]=tt
             results["transit_time_spread"][ix][jy]=tts
-    if DEBUG:
+    if DEBUG and False:
         plt.legend()
         plt.savefig("all_three.png", dpi=400)
         plt.show()
+    
+    rad_out =  np.sqrt((xs - pmt_x)**2 + (ys-pmt_y)**2)
+    r_bins = np.linspace(0, 1.1*pmt_radius, 15)
+    radial_2d = np.histogram2d(rad_out[keep], diff, bins=(r_bins, dif_bins))[0]
+    means = []
+    rspreads = []
+    for ri in range(len(r_bins)-1):
+        mean, spread = extract_values(time_centers, radial_2d[ri], False)
+        means.append(mean)
+        rspreads.append(spread)
+    means -= np.nanmean(mean)
+    print(means)
+    print(rspreads)
+    plt.stairs(means, r_bins, label="Transit Time")
+    plt.stairs(rspreads, r_bins, label="Transit Time Spread")
+    plt.legend()
+    plt.xlabel("Radius Out [m]")
+    plt.ylabel("Time [ns]")
+    plt.savefig(os.path.join(os.path.dirname(__file__), "plots","{}".format(run_no), "mrr_transit_time_{}.png".format(run_no)), dpi=400)
+    plt.clf()
+
+
+
     obj = open("./results/timing_results_{}.json".format(run_no),'wt')
 
     output = {
@@ -216,17 +238,20 @@ def main(filename):
     xmesh, ymesh = np.meshgrid(x_centers, y_centers)
 
     exclude = (xmesh - pmt_x)**2 + (ymesh-pmt_y)**2 > pmt_radius**2
+
+
     results["transit_time"][exclude.T]=None
     results["transit_time_spread"][exclude.T] = None
-    plt.pcolormesh(x_edges,y_edges, np.transpose(results["transit_time"]),  cmap="coolwarm", vmin=145, vmax=155)
+    plt.pcolormesh(x_edges,y_edges, np.transpose(results["transit_time"])-np.nanmean(results["transit_time"]),  cmap="coolwarm", vmin=-5, vmax=5)
     cbar = plt.colorbar()
     cbar.set_label("[ns]")
     plt.xlabel("X [m]",size=14)
     plt.ylabel("Y [m]",size=14)
     plt.gca().set_aspect('equal')
-    plt.title("Transit Time", size=14)
-    plt.savefig(os.path.join(os.path.dirname(__file__), "plots", "transit_time_{}.png".format(run_no)), dpi=400)
+    plt.title("Relative Transit Time", size=14)
+    plt.savefig(os.path.join(os.path.dirname(__file__), "plots","{}".format(run_no), "transit_time_{}.png".format(run_no)), dpi=400)
     plt.clf()
+
 
     plt.pcolormesh(x_edges,y_edges, 2*sqrt(2*log(2))*np.transpose(results["transit_time_spread"]), vmin=0, vmax= 10)
     cbar = plt.colorbar()
@@ -235,7 +260,7 @@ def main(filename):
     plt.ylabel("Y [m]",size=14)
     plt.gca().set_aspect('equal')
     plt.title("Transit Time Spread (FWHM)", size=14)
-    plt.savefig(os.path.join(os.path.dirname(__file__), "plots", "transit_time_spread_{}.png".format(run_no)), dpi=400)
+    plt.savefig(os.path.join(os.path.dirname(__file__), "plots","{}".format(run_no), "transit_time_spread_{}.png".format(run_no)), dpi=400)
     plt.clf()
 
 if __name__=="__main__":
