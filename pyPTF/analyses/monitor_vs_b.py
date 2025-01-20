@@ -10,9 +10,9 @@ import matplotlib.pyplot as plt
 CHARGE = True
 
 def main():
-    field_bin = np.linspace(0.2,0.7, 199)
+    field_bin = np.linspace(0,1.4, 199)
     d_eff_bin = np.linspace(0, 0.5, 100)
-    charge_bin = np.linspace(-0.015, -0.005, 101)
+    charge_bin = np.linspace(-0.02, 0, 101)
 
     if CHARGE:
         hdata = np.zeros((len(field_bin)-1, len(charge_bin)-1))
@@ -20,7 +20,7 @@ def main():
         hdata = np.zeros((len(field_bin)-1, len(d_eff_bin)-1))
 
     allruns = [
-        5778
+        5750, 5771, 5748,5778, 5782
     ]
 
     runs_z = [5769, 5751, 5752, 5774]
@@ -66,12 +66,12 @@ def main():
             hdata += np.histogram2d(bfield[mask], det_eff[mask], bins=(field_bin, d_eff_bin))[0]
 
     if CHARGE:
-        plt.pcolormesh(field_bin,charge_bin, hdata.T)
+        plt.pcolormesh(field_bin,charge_bin, np.log(hdata.T+1))
     else:
         plt.pcolormesh(field_bin,d_eff_bin, hdata.T)
     plt.title("Monitor Rate Stability",size=14)
     cbar = plt.colorbar()
-    cbar.set_label("Counts")
+    cbar.set_label("log(Counts +1)")
     plt.xlabel(r"$\left| \vec{B} \right|$ [G]",size=14)
     if CHARGE:
         plt.ylabel("Avg. Charge", size=14)
