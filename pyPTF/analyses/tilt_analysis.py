@@ -5,7 +5,7 @@ from math import sin, cos, pi
 
 import matplotlib.pyplot as plt 
 
-from pyPTF.analyses.charge import fit_binned_data, get_analysis_charge, BIN_WIDTHS, CHARGE_BINNING, gaus, gaus_mu
+from pyPTF.analyses.charge import fit_binned_data, get_analysis_charge, BIN_WIDTHS, CHARGE_BINNING, gaus, gaus_mu, PTF_SCALE
 from pyPTF.analyses.timing import TIME_EDGES, extract_values, PTF_SAMPLE_WIDTH
 from pyPTF.utils import project_point_to_plane, get_color
 from tqdm import tqdm 
@@ -14,7 +14,7 @@ PMT_X = 0.417
 PMT_Y = 0.297
 PMT_Z_CENTER = 0.332
 
-RATIO = True
+RATIO = False
 DEBUG = False
 
 def process_dataset_charge(data_dict):
@@ -28,7 +28,7 @@ def process_dataset_charge(data_dict):
     """
     xs = np.array(data_dict["x"][:])
     ys = np.array(data_dict["y"][:])
-    zs = np.array(data_dict["y"][:])
+    zs = np.array(data_dict["z"][:])
 
     unique_points = np.unique(np.array([xs, ys, zs]).T , axis=0)
     tilt = np.array(data_dict["tilt"][:])
@@ -52,10 +52,13 @@ def process_dataset_charge(data_dict):
 
     charges = get_analysis_charge(data_dict)
 
+    
+
     this_data = {
         "points":[],
         "det_eff":[],
         "gain":[],
+        "avg_charge":[]
     }
 
     # we have a series of points we want to evaluate the data at. 
@@ -80,7 +83,6 @@ def process_dataset_charge(data_dict):
 
 
         tilts.append(np.mean(tilt[conditional]))
-
         projected_point = project_point_to_plane(this_point, plane_p0, plane_norm)
 
         if any([np.isnan(entry) for entry in projected_point]):
@@ -111,6 +113,7 @@ def process_dataset_charge(data_dict):
         this_data["gain"].append(q1_fit[1])
         this_data["det_eff"].append(det_eff)
         this_data["points"].append(projected_point)
+        this_data["avg_charge"].append(-1*np.mean(data_dict["charge_sum"][conditional])/PTF_SCALE)
 
     return this_data
 
@@ -130,8 +133,13 @@ def extract_timing(data_dict):
     rot  = [180-45,] #np.array(data_dict["pmt0"]["rot"][:])
 
     avg_tilt = np.nanmean(tilt)*pi/180
+
+    plt.plot(range(len(tilt)), tilt)
+    plt.show()
+    plt.clf()
     print("Observed tilt of {}".format(avg_tilt*180/pi))
     avg_rot = np.nanmean(rot)*pi/180
+    print("Observed rot of {}".format(avg_rot*180/pi))
 
 
     keep =  np.array(data_dict["pmt0"]["passing"])
@@ -206,28 +214,31 @@ def main(filename):
         sk_pmt[tk] = timing[tk]
     
 
-    charge_keys = ["det_eff", "gain"] + time_keys
+    charge_keys = ["det_eff", "gain", "avg_charge"] + time_keys
 
     titles={
         "det_eff":"Detection Eff.", 
         "gain":"Q1 Gain",
         "times":"Transit Time",
-        "tts":r"TTS (1$\sigma$)"
+        "tts":r"TTS (1$\sigma$)",
+        "avg_charge":"Avg. Charge"
     }
     
     if RATIO:
         bounds = np.array([
             [0.5, 1.5],
             [1.5,4],
+            [0, 600],
             [283, 303],
-            [0,10]
+            [0,10],
         ])
     else:
         bounds = np.array([
             [0, 0.5],
             [0, 800],
+            [0, 600],
             [283, 303],
-            [0,10]
+            [0,10],
         ])
     
     on_pmt = np.array(sk_pmt["det_eff"])>0.05 
@@ -256,9 +267,9 @@ def main(filename):
         
         #plt.imshow([[]], vmin=bounds[ik][0], vmax=bounds[ik][1], cmap="viridis")
         plt.clf()
-        plt.pcolormesh([-10,-9],[-10,-9], [[0]],vmin=bounds[ik][0], vmax=bounds[ik][1], cmap="viridis")
+        plt.pcolormesh([-10,-9],[-10,-9], [[0]],vmin=bounds[ik][0], vmax=bounds[ik][1], cmap="inferno")
         plt.colorbar()
-        plt.scatter(xs, ys, color=get_color(colorval, 1,"viridis"))
+        plt.scatter(xs, ys, color=get_color(colorval, 1,"inferno"))
         plt.xlabel("Projected x [m]",size=12)
         plt.ylabel("Projected y [m]",size=12)
         plt.xlim([min(xs), max(xs)])
@@ -269,7 +280,9 @@ def main(filename):
         
         plt.gca().set_aspect('equal')
         plt.tight_layout()
-        plt.savefig("./plots/{}_{}.png".format(key, run_number), dpi=400)
+        if not os.path.exists("./plots/{}".format(run_number)):
+            os.mkdir("./plots/{}".format(run_number))
+        plt.savefig("./plots/{}/{}_{}.png".format(run_number,key, run_number), dpi=400)
         
         plt.show()
 

@@ -37,7 +37,7 @@ def analytic_norm(theta, phi):
 
     return norm_x, norm_y, norm_z # make sure we always aim up 
 
-def is_point_visible(x_pos, y_pos, zenith_angle, azimuth_angle):
+def is_point_visible(x_pos, y_pos, zenith_angle, azimuth_angle, meshes=False)->np.ndarray:
     """
     
     """
@@ -45,10 +45,12 @@ def is_point_visible(x_pos, y_pos, zenith_angle, azimuth_angle):
     n_y = np.sin(azimuth_angle)*np.cos(zenith_angle)
     n_z = np.sin(zenith_angle)
 
-    
-    xmesh, ymesh= np.meshgrid(x_pos, y_pos)
+    if meshes:
+        xmesh = x_pos
+        ymesh = y_pos
+    else:    
+        xmesh, ymesh= np.meshgrid(x_pos, y_pos)
     z_pos = c*((1 - (xmesh/a)**2 - (ymesh/b)**2)**0.5)
-
     phi = np.arctan2(ymesh, xmesh)
 
     theta = np.arcsin(z_pos/c)
