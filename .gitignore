@@ -8,7 +8,18 @@ data/*.root
 data/*.hdf5
 data/*.json
 
-pyPTF/analyses/plots/*.png
+pyPTF/analyses/*.json
+pyPTF/analyses/waveforms
+
+pyPTF/analyses/plots
+pyPTF/analyses/meta_plots
+pyPTF/analyses/results
+pyPTF/analyses/datafiles
+
+
+
+**.DS_STORE
+**.png
 
 # C extensions
 *.so
