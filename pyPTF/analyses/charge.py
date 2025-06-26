@@ -28,7 +28,7 @@ pmt_radius =0.508/2
 DEBUG = False
 RATIO = False
 
-CHARGE_BINNING = np.linspace(0, 1500, 800)
+CHARGE_BINNING = np.linspace(-100, 1500, 800)
 BIN_CENTERS = 0.5*(CHARGE_BINNING[:-1] + CHARGE_BINNING[1:])
 BIN_WIDTHS  = CHARGE_BINNING[1:] - CHARGE_BINNING[:-1]
 
@@ -313,6 +313,9 @@ def process_analysis(data_dict:dict, is_monitor=False):
     """
     xs = np.array(data_dict["x"][:])
     ys = np.array(data_dict["y"][:])
+    zs = np.array(data_dict["z"][:])
+    all_tilts = np.array(data_dict["tilt"][:])
+    all_rots = np.array(data_dict["rot"][:])
 
     x_edges = make_bin_edges(xs)
     y_edges = make_bin_edges(ys)
@@ -358,6 +361,10 @@ def process_analysis(data_dict:dict, is_monitor=False):
     counts = np.histogram2d(xs, ys, bins=(x_edges,y_edges))[0]
     kcounts = np.histogram2d(xs[keep], ys[keep], bins=(x_edges,y_edges))[0]
     avg_charge = np.histogram2d(xs, ys, bins=(x_edges,y_edges), weights=-1*np.array(data_dict["charge_sum"])/PTF_SCALE)[0]/counts
+    avg_z = np.histogram2d(xs, ys, bins=(x_edges, y_edges), weights=zs)[0]/counts 
+    avg_rot = np.histogram2d(xs, ys, bins=(x_edges, y_edges), weights=all_rots)[0]/counts 
+    avg_tilt = np.histogram2d(xs, ys, bins=(x_edges, y_edges), weights=all_tilts)[0]/counts 
+
     gain = np.histogram2d(xs[keep], ys[keep], bins=(x_edges,y_edges), weights=-1*charge_pass/PTF_SCALE)[0]/kcounts
 
     bfield = np.histogram2d(xs, ys, bins=(x_edges,y_edges), weights=data_dict["bfield"])[0]/counts
@@ -372,7 +379,10 @@ def process_analysis(data_dict:dict, is_monitor=False):
         "hq1pemu":np.zeros((n_x,n_y)),
         "error":np.zeros((n_x, n_y)),
         "xs":x_edges,
-        "ys":y_edges
+        "ys":y_edges,
+        "tilt":avg_tilt, 
+        "zs":avg_z,
+        "rot":avg_rot
     }
     plt.clf()
     for ix in tqdm(range(n_x)):
@@ -450,7 +460,7 @@ def main_new(filename):
 
     
     skip_keys =[
-        "rot","tilt", "x", "y", "run_no"
+        "rot","tilt", "x", "y","z", "run_no"
     ]
     ratio = {}
 
@@ -500,16 +510,16 @@ def main_new(filename):
         
 
         if True:
-                ratio[key][np.logical_not(exclude).T] = None
+                #ratio[key][np.logical_not(exclude).T] = None
                 if  key=="det_eff":
-                    print("Mean Detection: {}".format(np.mean(ratio[key][exclude.T])))
+                    #print("Mean Detection: {}".format(np.mean(ratio[key][exclude.T])))
                     absorb = abs_prob(get_centers(pmt_20in_res["xs"]), get_centers(pmt_20in_res["ys"]))
 
                     plt.pcolormesh(pmt_20in_res["xs"], pmt_20in_res["ys"], np.transpose(ratio[key]), cmap='inferno', vmin=bounds[key][0], vmax=bounds[key][1])
                 
                 elif key in bounds_dict:
                     if  key!="bfield" and key!="avg_charge":
-                        ratio[key][np.logical_not(exclude).T] = None
+                        #ratio[key][np.logical_not(exclude).T] = None
                         cmap = "inferno"
                     else:
                         cmap ="RdBu"

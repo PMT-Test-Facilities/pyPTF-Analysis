@@ -118,38 +118,6 @@ def root_to_hdf5(root_file_path, hdf5_file_path):
     out_file.close()
 
 
-def reconstruct_json_as_dict(data):
-    """
-        takes a pulse fit series and constructs an analysis-friendly dictionary for the data
-    """
-
-    keys = [
-        "x","y","z","tilt","rot",
-        "amplitudes","sigmas","means","peds"    
-    ]
-
-    outdata = {
-        "pmt0":{key:[] for key in keys},
-        "monitor":{key:[] for key in keys},
-        "run_no":data["run_no"]
-    }
-    #pmt = "pmt0"
-    for pmt in ["pmt0","monitor"]:
-       
-        for scanpoint in data[pmt].keys():
-            
-            for i_wave in range(len(data[pmt][scanpoint]["amplitudes"])):
-                outdata[pmt]["x"].append(data[pmt][scanpoint]["x"])
-                outdata[pmt]["y"].append(data[pmt][scanpoint]["y"])
-                outdata[pmt]["tilt"].append(data[pmt][scanpoint]["tilt"])
-                outdata[pmt]["rot"].append(data[pmt][scanpoint]["rot"])
-
-            outdata[pmt]["amplitudes"]+= data[pmt][scanpoint]["amplitudes"]
-            outdata[pmt]["sigmas"] += data[pmt][scanpoint]["sigmas"]
-            
-
-    return outdata
-
 def analyze_waveforms(run_number):
     """
         This runs a simple parser on the monitor and the Hammamatsu PMT data 

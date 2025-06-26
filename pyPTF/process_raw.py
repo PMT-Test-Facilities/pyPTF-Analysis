@@ -111,8 +111,8 @@ def process_into_fitseries(meta_data:dict, which_pmt):
 
         keys = [
             "x","y","z","tilt","rot",
-            "amplitudes","sigmas","means","peds",
-            "n_pass", "pulse_times", "passing",
+            "amplitudes","sigmas",
+            "n_pass", "pulse_times", "passing","np_pass","pp_pass",
             "bfield", "charge_sum"
         ]
 
@@ -154,13 +154,16 @@ def process_into_fitseries(meta_data:dict, which_pmt):
         outdata["passing"]+=this_ps.passing
 
         if not dummy:
+
             outdata["amplitudes"]+= this_ps.amplitudes
             outdata["bfield"]+=[meta_data["phidg0_Btot"][i],]*len(this_ps)
             outdata["sigmas"]+=this_ps.sigmas
             outdata["charge_sum"] += this_ps.charge_sum
-            outdata["means"]+=this_ps.means
+            #outdata["means"]+=this_ps.means
             
             if len(this_ps)!=0:
+                outdata["np_pass"] += [this_ps.np_pass/len(this_ps), ]*len(this_ps)
+                outdata["pp_pass"] +=[this_ps.pp_pass/len(this_ps), ]*len(this_ps)
                 outdata["n_pass"] +=[this_ps.pass_fract/len(this_ps), ]*len(this_ps)
             else:
                 outdata["n_pass"] +=[0, ]*len(this_ps)

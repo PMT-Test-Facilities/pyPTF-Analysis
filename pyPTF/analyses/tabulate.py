@@ -16,6 +16,7 @@ baseline_no = 5770
 charge = False
 
 datafiles = [
+    [5745, "0mG"],
     [5769, "-80mG in z"],
     [5751, "-100mG in z"],
     [5752, "100mG in z"],
@@ -96,7 +97,10 @@ def build_spline():
         azimuths.append(azimuthal)
         zeniths.append(zenith)
 
-        efficiency.append(ratio / baseline)
+        addy= ratio / baseline
+        if addy<0.78:
+            addy = 0.78
+        efficiency.append(addy)
 
 
 
@@ -129,3 +133,4 @@ if __name__=="__main__":
     for entry in datafiles:
         pmt20, monitor, ratio = get_efficiency(entry[0])
         print(entry[0], entry[1], pmt20, monitor, ratio, ratio/baseline)
+    

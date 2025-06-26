@@ -29,10 +29,10 @@ def get_efficienfy(field_zenith, field_azi, this_field):
     """
 
     field_effect= spline_interpolator(field_zenith, field_azi, grid=False)
+    print("{} - {}".format(np.nanmin(field_effect), np.nanmax(field_effect)))
     field_strength = np.sqrt(np.sum(this_field**2, axis=1))
-
-
-    power = field_strength / 100
+    print("{} - {}".format(np.nanmin(field_strength), np.nanmax(field_strength)))
+    power = 0.5*field_strength / 100
     rval = field_effect**power
 
     return rval
@@ -136,8 +136,8 @@ if __name__=="__main__":
     field_perp = np.cos(zenthith_angle)*field_mag
     print("field total : {} - {}".format(np.nanmin(field_mag), np.nanmax(field_mag)))
     random_azi = np.array([sample_azimuth() for i in range(len(zenthith_angle))])
-    field_effect = get_efficienfy(zenthith_angle, random_azi, field)+ np.random.rand(len(field_perp))*0.05 -0.025
-    #area_effect = get_area_effects(positions)
+    field_effect = get_efficienfy(zenthith_angle, random_azi, field) + np.random.rand(len(field_perp))*0.05 -0.025
+    area_effect = get_area_effects(positions)
 
 
     b_bins = np.linspace(-10, 350, 100)
@@ -146,6 +146,6 @@ if __name__=="__main__":
     binned = np.histogram2d(field_perp, field_effect, bins=(b_bins, ce_bins))[0]
     plt.pcolormesh(b_bins, ce_bins, binned.T , cmap="jet",vmax=60, vmin=0)
     plt.colorbar()
-    plt.xlabel("B Perpendicular [mG]", size=14)
+    plt.xlabel("B Parallel [mG]", size=14)
     plt.ylabel("Relative CE",size=14)
     plt.show()

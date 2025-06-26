@@ -91,7 +91,7 @@ if __name__=="__main__":
         deg = pi/180
 
         zenith = _zenith*deg
-        azimuth = 232*deg 
+        azimuth = 0 # 232*deg 
 
         visible = is_point_visible(xs,ys, zenith, azimuth)
         visible = visible>0

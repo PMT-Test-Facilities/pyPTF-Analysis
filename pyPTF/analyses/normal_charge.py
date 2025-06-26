@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import json
 import os 
 
-from pyPTF.analyses.charge import fit_binned_data, get_analysis_charge, CHARGE_BINNING, BIN_WIDTHS, BIN_CENTERS
+from pyPTF.analyses.charge import fit_binned_data, get_analysis_charge, CHARGE_BINNING, BIN_WIDTHS, BIN_CENTERS, PTF_SCALE
 from pyPTF.analyses.timing import TIME_EDGES, extract_values
 from pyPTF.constants import PTF_TS, PTF_SAMPLE_WIDTH
 from pyPTF.utils import get_color
@@ -26,20 +26,23 @@ def process_dataset_charge(data_dict):
     charges = get_analysis_charge(data_dict)
     passing = np.array(data_dict["n_pass"])
     keep =  np.array(data_dict["passing"])
+    charge_pass = np.array(data_dict["charge_sum"])[keep]
+    
     # we bin these in position
 
-    #zeniths_deg = [10, 20, 30, 40, 45, 50, 60, 70, 80, 85]
-    zeniths_deg = [85, 80, 75, 70, 65, 60, 55, 50,45,40,30,20,10, 0][::-1]
-    zeniths_deg = []
+    zeniths_deg = [10, 20, 30, 40, 45, 50, 60, 70, 80, 85]
+    zeniths_deg = [85, 80,75, 70, 65, 60, 55, 50,45,40,30,20,10,0][::-1]
+    #zeniths_deg = []
     gains = []
     det_effs = []
     stat_errors = []
 
     for xpos in unique_x[::-1]:
-        zeniths_deg.append(90+np.mean(tilt[xpos==xs]))
+        #zeniths_deg.append(90+np.mean(tilt[xpos==xs]))
         total_wav = sum(keep[xpos==xs].astype(int))
         
         these_charges = charges[xpos==xs]
+        these_pass = charges[np.logical_and(keep, xs==xpos)]
         det_eff = sum(data_dict["n_pass"][xpos==xs])/4
 
         stat_error = sqrt(total_wav*det_eff)/(total_wav*det_eff)
@@ -50,14 +53,10 @@ def process_dataset_charge(data_dict):
         binned_charges = np.histogram(these_charges, CHARGE_BINNING)[0]/BIN_WIDTHS
 
         fitped, q1_fit = fit_binned_data(binned_charges)
-        
 
-        avg_charge = np.mean(these_charges)
-        gain =  q1_fit[1]#  avg_charge/det_eff
+        gain = np.sum(-1*these_pass/PTF_SCALE)/len(these_pass)
+        #avg_charge = np.sum(-1*charges[xpos==xs]/PTF_SCALE)/len(charges[xpos==xs])
         
-        if gain<15:
-            print(gain, det_eff, avg_charge/det_eff)
-            gain=avg_charge/det_eff
    
         gains.append(gain)
         det_effs.append( det_eff )
@@ -89,10 +88,10 @@ def extract_transit_times(data_dict):
     dif_bins = np.arange(230, 310,PTF_SAMPLE_WIDTH)
 
     all_hist = np.histogram(diff, bins=dif_bins)[0]
-    plt.stairs(all_hist, dif_bins)
+    #plt.stairs(all_hist, dif_bins)
     plt.xlabel("Transit Time [ns]",size=14)
-    plt.ylabel("Counts",size=14)
-    plt.show()
+    #plt.ylabel("Counts",size=14)
+    #plt.show()
 
     xs = np.array(data_dict["pmt0"]["x"][:])
     ys = np.array(data_dict["pmt0"]["y"][:])
@@ -151,10 +150,10 @@ def make_plots(data, mon):
     ]
 
     labels={
-        "transit_time":"Relative TT",
-        "transit_time_spread": "TTS (FWHM)",
-        "gain":"Relative Gain",
-        "det_effs":"Relative Hit Eff."
+        "transit_time":"Relative TT [ns]",
+        "transit_time_spread": "TTS (FWHM) [ns]",
+        "gain":"Relative Gain [unitless]",
+        "det_effs":"Relative Hit Eff. [unitless]"
     }
 
     takefiles = [
@@ -172,19 +171,22 @@ def make_plots(data, mon):
         
     ]
 
-    for ik, key in enumerate(keys):
-        plt.clf()
-        print(key)
-        for i in [0,1]:          
+    direct = [" Y-Axis", " Diagonal"  ]
+    for i in [0, 1]:
+        
+
+        for ik, key in enumerate(keys):
+            print(key)
+            plt.clf()
             if "transit_time" in key and "spread" not in key: 
                 print(len(data[i]["zeniths"]), len(data[i][key]-data[i][key][0]))
                 plt.errorbar(data[i]["zeniths"], data[i][key]-data[i][key][0],
                       yerr=0.05*(data[i][key]-data[i][key][0]), capsize=5, ecolor='k',
-                      color=get_color(i+1, 3), marker="d")# , label=runlab[i])
+                      color=get_color(1, 3), marker="d", label="PTF")# , label=runlab[i])
             elif "spread" in key:
                 plt.errorbar(data[i]["zeniths"], data[i][key], 
                       yerr=0.05*data[i][key], capsize=5, ecolor='k',
-                      color=get_color(i+1, 3), marker="d")# , label=runlab[i])
+                      color=get_color(1, 3), marker="d", label="PTF")# , label=runlab[i])
             else:
 
                 toplot = data[i][key] #/ mon[i][key]
@@ -192,52 +194,57 @@ def make_plots(data, mon):
                 if "eff" in key:
                     plt.errorbar(data[i]["zeniths"], toplot/toplot[0], xerr=0,
                                 yerr=data[i]["stat_error"], capsize=5, ecolor='k',
-                            color=get_color(i+1, 3), marker="d") #, label=runlab[i])
+                            color=get_color(1, 3), marker="d", label="PTF") #, label=runlab[i])
                 else:
                     plt.errorbar(data[i]["zeniths"], toplot/toplot[0],
                             yerr=0.05*toplot/toplot[0], capsize=5, ecolor='k',
-                            color=get_color(i+1, 3), marker="d")# , label=runlab[i])
+                            color=get_color(1, 3), marker="d", label="PTF")# , label=runlab[i])
+
+            errors = data[i]["det_effs"]
+            plt.title(direct[i], size=14)
+            plt.ylim(bounds[ik])
 
 
+            if i==1:   
+                newdat = np.loadtxt("./datafiles/{}_d.dat".format(takefiles[ik]), delimiter=",",comments="#").T
+                cut = newdat[0]>-5
+                plt.plot(newdat[0][cut], newdat[1][cut],marker="x", color=get_color(2, 3), label="Takenaka-san")
+            else:
+                # perpendicular first 
+                newdat = np.loadtxt("./datafiles/{}_y.dat".format(takefiles[ik]), delimiter=",",comments="#").T
+                cut = newdat[0]>-5
+                plt.plot(newdat[0][cut], newdat[1][cut],marker="x", color=get_color(2, 3), label="Takenaka-san")
 
-
-        errors = data[i]["det_effs"]
-        plt.title(labels[key], size=14)
-        plt.ylim(bounds[ik])
-
-        # perpendicular first 
-        newdat = np.loadtxt("./datafiles/{}_y.dat".format(takefiles[ik]), delimiter=",",comments="#").T
-        cut = newdat[0]>-5
-        plt.plot(newdat[0][cut], newdat[1][cut],marker="x", color=get_color(0+1, 3))
-        newdat = np.loadtxt("./datafiles/{}_d.dat".format(takefiles[ik]), delimiter=",",comments="#").T
-        cut = newdat[0]>-5
-        plt.plot(newdat[0][cut], newdat[1][cut],marker="x", color=get_color(1+1, 3))
-        #plt.ylim([0.5, 1.5])
-        
-        plt.xlabel("Zenith [deg]", size=14)
-           
-        plt.plot([], [], color='k', marker="x", label="Takenaka-san")
-        plt.plot([], [], color='k', marker="d", label="PTF")
-        plt.plot([], [], color=get_color(0+1, 3), marker="o", label="Diagonal")
-        plt.plot([], [], color=get_color(1+1, 3), marker="o", label="Y-axis")
-        plt.legend()
-        plt.savefig("./plots/norm_{}_first.png".format(key),dpi=400)
+            #plt.ylim([0.5, 1.5])
+            
+            plt.xlabel("Zenith [deg]", size=14)
+            
+            #plt.plot([], [], color='k', marker="x", label="Takenaka-san")
+            #plt.plot([], [], color='k', marker="d", label="PTF")
+            #plt.plot([], [], color=get_color(0+1, 3), marker="o", label="Diagonal")
+            #plt.plot([], [], color=get_color(1+1, 3), marker="o", label="Y-axis")
+            plt.ylabel(labels[key], size=14)
+            plt.legend()
+            plt.savefig("./plots/take/norm_{}_{}.png".format(key, direct[i]),dpi=400)
+            #plt.show()
     
 
 def main():
     root = "/Users/bsmithers/software/pyPTF-Analysis/data/"
 
-    files = [
-        "pulse_series_fit_run5715.hdf5",
-        "pulse_series_fit_run5714.hdf5",
-    ]
+
     """files = [
         "pulse_series_fit_run5724.hdf5",
         "pulse_series_fit_run5725.hdf5",
     ]"""
+
     files = [
         "pulse_series_fit_run5744.hdf5",
         "pulse_series_fit_run5743.hdf5",
+    ]
+    files = [
+        "pulse_series_fit_run5715.hdf5",
+        "pulse_series_fit_run5714.hdf5",
     ]
 
 

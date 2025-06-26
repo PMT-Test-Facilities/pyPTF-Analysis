@@ -202,7 +202,7 @@ def main(filename):
         plt.show()
     
     rad_out =  np.sqrt((xs - pmt_x)**2 + (ys-pmt_y)**2)
-    r_bins = np.linspace(0, 1.1*pmt_radius, 15)
+    r_bins = np.linspace(0,pmt_radius, 15)
     radial_2d = np.histogram2d(rad_out[keep], diff, bins=(r_bins, dif_bins))[0]
     means = []
     rspreads = []
@@ -220,8 +220,6 @@ def main(filename):
     plt.ylabel("Time [ns]")
     plt.savefig(os.path.join(os.path.dirname(__file__), "plots","{}".format(run_no), "mrr_transit_time_{}.png".format(run_no)), dpi=400)
     plt.clf()
-
-
 
     obj = open("./results/timing_results_{}.json".format(run_no),'wt')
 

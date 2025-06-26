@@ -33,7 +33,7 @@ def process_dataset_charge(data_dict):
     unique_points = np.unique(np.array([xs, ys, zs]).T , axis=0)
     tilt = np.array(data_dict["tilt"][:])
     
-    rot  = [180-45,] # np.array(data_dict["rot"][:])
+    rot  = [180+45,] # np.array(data_dict["rot"][:])
     tilts = []
 
     # need to get the general aiming direction to project these into 2D 
@@ -130,7 +130,7 @@ def extract_timing(data_dict):
     unique_points = np.unique(np.array([xs, ys, zs]).T , axis=0)
 
     tilt = np.array(data_dict["pmt0"]["tilt"][:])
-    rot  = [180-45,] #np.array(data_dict["pmt0"]["rot"][:])
+    rot  = [180+45,] #np.array(data_dict["pmt0"]["rot"][:])
 
     avg_tilt = np.nanmean(tilt)*pi/180
 
@@ -138,7 +138,7 @@ def extract_timing(data_dict):
     plt.show()
     plt.clf()
     print("Observed tilt of {}".format(avg_tilt*180/pi))
-    avg_rot = np.nanmean(rot)*pi/180
+    avg_rot = pi-np.nanmean(rot)*pi/180
     print("Observed rot of {}".format(avg_rot*180/pi))
 
 
@@ -215,35 +215,26 @@ def main(filename):
     
 
     charge_keys = ["det_eff", "gain", "avg_charge"] + time_keys
-
-    titles={
-        "det_eff":"Detection Eff.", 
-        "gain":"Q1 Gain",
-        "times":"Transit Time",
-        "tts":r"TTS (1$\sigma$)",
-        "avg_charge":"Avg. Charge"
+    
+    bounds_dict={
+        "Q_1":[0,900],
+        "Sigma_1":[0,700],
+        "mu":[0,0.5],
+        "hq1pemu":[0,500],
+        "avg_charge":[0, 600],
+        "det_eff":[0., 0.5],
+        "bfield":[0, 1.1],
+        "error":[-0.01 , 0.01]
     }
     
-    if RATIO:
-        bounds = np.array([
-            [0.5, 1.5],
-            [1.5,4],
-            [0, 600],
-            [283, 303],
-            [0,10],
-        ])
-    else:
-        bounds = np.array([
-            [0, 0.5],
-            [0, 800],
-            [0, 600],
-            [283, 303],
-            [0,10],
-        ])
     
     on_pmt = np.array(sk_pmt["det_eff"])>0.05 
 
-    
+    title_keys = {key:key for key in sk_pmt.keys()}
+    title_keys["Q_1"] = r"$Q_{1}$ Gain [ADC]"
+    title_keys["det_eff"] = "Detection Efficiency"
+    title_keys["avg_charge"] = "Avg. Charge [ADC]"
+    title_keys["error"]=r"d$\delta$/dADC"
     for ik, key in enumerate(charge_keys):
         
         xs = []
@@ -261,20 +252,21 @@ def main(filename):
         
         print(np.mean(np.array(sk_pmt[key])[on_pmt]))
 
+        value = np.array(value)
         xs = -1*np.array(xs)
         
-        colorval = (value - bounds[ik][0])/(bounds[ik][1] - bounds[ik][0])
+        colorval = (value - bounds_dict[key][0])/(bounds_dict[key][1] - bounds_dict[key][0])
         
         #plt.imshow([[]], vmin=bounds[ik][0], vmax=bounds[ik][1], cmap="viridis")
         plt.clf()
-        plt.pcolormesh([-10,-9],[-10,-9], [[0]],vmin=bounds[ik][0], vmax=bounds[ik][1], cmap="inferno")
+        plt.pcolormesh([-10,-9],[-10,-9], [[0]],vmin=bounds_dict[key][0], vmax=bounds_dict[key][1], cmap="inferno")
         plt.colorbar()
-        plt.scatter(xs, ys, color=get_color(colorval, 1,"inferno"))
+        plt.scatter(xs, ys, color=get_color(colorval, 1,"inferno"),s=14)
         plt.xlabel("Projected x [m]",size=12)
         plt.ylabel("Projected y [m]",size=12)
         plt.xlim([min(xs), max(xs)])
         plt.ylim([min(ys), max(ys)])
-        plt.title(titles[key], size=14)
+        plt.title(title_keys[key], size=14)
         
         
         
