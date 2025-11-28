@@ -5,6 +5,7 @@ from pyPTF.utils import Irregular2DInterpolator
 import json 
 import os 
 import matplotlib.pyplot as plt 
+from scipy.interpolate import CubicSpline
 
 """
     We need to determine a scaling factor for converting between vertical injection and light from other directions
@@ -140,6 +141,26 @@ def get_intersection(light_zenith:np.ndarray, light_azimuth:np.ndarray, source_p
 
     return pmt_zen, pmt_azi
          
+_raw_absorption_data = np.loadtxt(os.path.join(os.path.dirname(__file__), "glass_simulation.dat"), delimiter=",").T
+_raw_absorption_data[1][_raw_absorption_data[1]<0]= 0.0
+ABS_SPLINE = CubicSpline(_raw_absorption_data[0]*pi/180, _raw_absorption_data[1])
+
+def get_absorption(theta_outer):
+    """
+        Given an angle of incidence on the PMT surface of theta, find the 
+        Can we use the small angle approximation? No, this does not work
+    """
+
+    N_GLASS = 1.4
+    GLASS_THICK = 5e-3 # 20mm 
+    RADIUS = 0.2 # approximate this like a sphere for "close enough" approximation
+    theta_glass = np.arcsin(np.sin(theta_outer)/N_GLASS)
+
+    # in the big-PMT approximation, this returns to the glass-plane case 
+    
+    angle_of_incidence = theta_glass + np.arctan(np.tan(theta_glass)*GLASS_THICK/RADIUS)
+
+    return ABS_SPLINE(angle_of_incidence)
 
 def area_scale(pmt_zen, pmt_azi, light_zenith, light_azimuth, perfect=False):
     scales = np.ones_like(pmt_zen)
@@ -157,8 +178,10 @@ def area_scale(pmt_zen, pmt_azi, light_zenith, light_azimuth, perfect=False):
 
     vertical_scale = np.abs(norm_z*-1)
     injection_scale = np.abs(nx*norm_x + ny*norm_y + nz*norm_z)
-    
-    return injection_scale / vertical_scale
+
+    absorption_scaler = get_absorption(np.arccos(injection_scale))/ get_absorption(np.arccos(vertical_scale))
+
+    return absorption_scaler*(injection_scale / vertical_scale)
     if perfect:
         return injection_scale
     else:
@@ -240,7 +263,7 @@ def get_differential(pmt_resonse_spline, radius, theta, light_zenith, light_azim
         pmt_response = pmt_resonse_spline(xval, yval)   
         if np.isnan(pmt_response):
             return 0 # , [xval, yval, zval], source_points
-        return (pmt_response*area_term) #, [xval, yval, zval], source_points
+        return (radius*pmt_response*area_term) #, [xval, yval, zval], source_points
 
 
 
@@ -341,6 +364,8 @@ if __name__=="__main__":
 
     zeniths = -1*np.arccos(np.linspace(0,1, 10))
     effs = [get_efficiency(spline, zen, 0) for zen in zeniths]
+
+
 
     plt.plot(zeniths, effs)
     plt.xlabel("Zenith [rad]",size=14)
