@@ -32,7 +32,7 @@ def get_efficienfy(field_zenith, field_azi, this_field):
     print("{} - {}".format(np.nanmin(field_effect), np.nanmax(field_effect)))
     field_strength = np.sqrt(np.sum(this_field**2, axis=1))
     print("{} - {}".format(np.nanmin(field_strength), np.nanmax(field_strength)))
-    power = 0.5*field_strength / 100
+    power = field_strength / 100
     rval = field_effect**power
 
     return rval
