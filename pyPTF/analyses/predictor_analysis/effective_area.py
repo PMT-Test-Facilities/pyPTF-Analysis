@@ -356,18 +356,31 @@ if __name__=="__main__":
     root_folder = os.path.join(os.path.dirname(__file__), "..","results")
     template = "charge_results_{}.json"
 
+    from tqdm import tqdm
+
     test_file = os.path.join(
         root_folder,
         template.format(5745)
     )
     spline = build_response_spline(test_file)
 
-    zeniths = -1*np.arccos(np.linspace(0,1, 10))
-    effs = [get_efficiency(spline, zen, 0) for zen in zeniths]
+    N_GRID = 3
+    zeniths = -1*np.arccos(np.linspace(0,1, N_GRID))
+    azimuths = np.linspace(0, 2*pi, N_GRID+1)
 
+    results = np.zeros((N_GRID, N_GRID+1))
+    for i,zen in enumerate(zeniths):
+        for j,azi in enumerate(azimuths):
+            results[i][j] = get_efficiency(spline, zen, azi)
 
-
-    plt.plot(zeniths, effs)
-    plt.xlabel("Zenith [rad]",size=14)
-    plt.ylabel("Avg. Effeciency")
-    plt.show()
+    data_raw = {
+        "zeniths":zeniths.tolist(),
+        "azimuths":azimuths.tolist(),
+        "efficiency":results.tolist(),
+        "ptf_run_number":5745,
+        "ptf_run_file":test_file,
+    }
+    import json 
+    _obj = open(os.path.join(os.path.dirname(__file__),"output_files","run_{}_angular_efficiency.json"),'rt')
+    json.dump(data_raw, _obj)
+    _obj.close()
