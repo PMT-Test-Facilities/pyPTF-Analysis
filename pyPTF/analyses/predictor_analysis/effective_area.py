@@ -6,6 +6,7 @@ import json
 import os 
 import matplotlib.pyplot as plt 
 from scipy.interpolate import CubicSpline
+from scipy.optimize import minimize
 
 """
     We need to determine a scaling factor for converting between vertical injection and light from other directions
@@ -104,7 +105,7 @@ def get_intersection(light_zenith:np.ndarray, light_azimuth:np.ndarray, source_p
     is_numpy = False
     if isinstance(dot_product, np.ndarray):
         is_numpy = True
-        if any(dot_product>0):
+        if (dot_product>0).any():
             raise ValueError("Light direction must be towards PMT ")
     else:
         if dot_product>0:
@@ -118,8 +119,8 @@ def get_intersection(light_zenith:np.ndarray, light_azimuth:np.ndarray, source_p
     has_soln = pre_root>0 
 
     if is_numpy:
-        pre_root[has_soln] = np.sqrt(pre_root)
-        pre_root[np.logical_not(has_soln)] = np.nan
+        pre_root[pre_root>0 ] = np.sqrt(pre_root[pre_root>0 ])
+        pre_root[pre_root<=0] = np.nan
     else:
         if not has_soln:
             return np.nan, np.nan
@@ -152,7 +153,7 @@ def get_absorption(theta_outer):
     """
 
     N_GLASS = 1.4
-    GLASS_THICK = 5e-3 # 20mm 
+    GLASS_THICK = 5e-3 
     RADIUS = 0.2 # approximate this like a sphere for "close enough" approximation
     theta_glass = np.arcsin(np.sin(theta_outer)/N_GLASS)
 
@@ -166,8 +167,6 @@ def area_scale(pmt_zen, pmt_azi, light_zenith, light_azimuth, perfect=False):
     scales = np.ones_like(pmt_zen)
     scales[np.isnan(pmt_zen)] = 0
 
-    vertical_injection = np.array([0,0, -1])
-
     # light paramers 
     nx = np.cos(light_azimuth)*np.cos(light_zenith)
     ny = np.sin(light_azimuth)*np.cos(light_zenith)
@@ -179,14 +178,48 @@ def area_scale(pmt_zen, pmt_azi, light_zenith, light_azimuth, perfect=False):
     vertical_scale = np.abs(norm_z*-1)
     injection_scale = np.abs(nx*norm_x + ny*norm_y + nz*norm_z)
 
-    absorption_scaler = get_absorption(np.arccos(injection_scale))/ get_absorption(np.arccos(vertical_scale))
-
-    return absorption_scaler*(injection_scale / vertical_scale)
     if perfect:
-        return injection_scale
+        absorption_scaler = get_absorption(np.arccos(injection_scale)) / get_absorption(np.arccos(vertical_scale))
     else:
-        return injection_scale / vertical_scale
+        absorption_scaler = get_absorption(np.arccos(injection_scale)) / get_absorption(np.arccos(vertical_scale))
+
+    if perfect:
+        return np.ones_like(absorption_scaler)* (injection_scale / vertical_scale)
+    else:
+        return absorption_scaler * (injection_scale / vertical_scale)
     
+
+
+def alt_construct_offset(light_zenith, light_azimuth, theta, radius):
+    # Base offset: shape (3, N, M)
+    offset = np.stack([
+        np.zeros_like(radius),
+        radius * np.cos(theta),
+        radius * np.sin(theta)
+    ], axis=0)
+
+    # Rotation matrix around Y (light_zenith)
+    R_y = np.array([
+        [ np.cos(light_zenith), 0, -np.sin(light_zenith)],
+        [ 0,                   1,  0                  ],
+        [ np.sin(light_zenith), 0,  np.cos(light_zenith)]
+    ])
+
+    # Rotation matrix around Z (light_azimuth)
+    R_z = np.array([
+        [ np.cos(light_azimuth), -np.sin(light_azimuth), 0],
+        [ np.sin(light_azimuth),  np.cos(light_azimuth), 0],
+        [ 0,                      0,                     1]
+    ])
+
+    # Apply R_y: (3,3) × (3,N,M) → (3,N,M)
+    offset = np.einsum('ij,jkl->ikl', R_y, offset)
+
+    # Apply R_z: (3,3) × (3,N,M) → (3,N,M)
+    offset = np.einsum('ij,jkl->ikl', R_z, offset)
+
+    return offset
+
 def construct_offset(light_zenith, light_azimuth, theta, radius):
     offset = np.array([
         np.zeros_like(radius),
@@ -194,6 +227,9 @@ def construct_offset(light_zenith, light_azimuth, theta, radius):
         radius*np.sin(theta),
         
     ])
+
+    if type(theta)==np.ndarray:
+        return alt_construct_offset(light_zenith, light_azimuth, theta, radius)
     
     # rotate about the Y axis by light_zenith 
     offset = np.matmul(
@@ -224,9 +260,16 @@ def get_differential(pmt_resonse_spline, radius, theta, light_zenith, light_azim
             Then we need to multiply by the 
     """
 
+    numpy_mode = type(radius)==np.ndarray
+
+
     nx = np.cos(light_azimuth)*np.cos(light_zenith)
     ny = np.sin(light_azimuth)*np.cos(light_zenith)
-    nz = np.sin(light_zenith) 
+    nz = np.sin(light_zenith)
+    if numpy_mode:
+        nx = nx * np.ones_like(radius)
+        ny = ny * np.ones_like(radius)
+        nz = nz * np.ones_like(radius)
 
     # step far away in the opposite direction to get source point(s)
     source_points = np.array([
@@ -249,23 +292,30 @@ def get_differential(pmt_resonse_spline, radius, theta, light_zenith, light_azim
 
     
     area_term = area_scale( pmt_zen, pmt_azi, light_zenith, light_azimuth, perfect)
-    if pmt_zen<0:
-        return 0.0
 
     # using the intersection, we can determine how we rescale the value according to differential areas
     # we also throw in the radius as part of the jacobian for polar coords
     #  pmt_response  *area_scale( pi/2-pmt_zen, pmt_azi, light_zenith, light_azimuth)
-    if np.isnan(area_term):
-        return 0 #, [xval, yval, zval], source_points
+    if numpy_mode:
+        pmt_zen[pmt_zen<0] = 0
+        area_term[np.isnan(area_term)] = 0
+    else:
+        if pmt_zen<0:
+            return 0
+        if np.isnan(area_term):
+            return 0
+
     if perfect:
         return radius*area_term
     else:
         pmt_response = pmt_resonse_spline(xval, yval)   
-        if np.isnan(pmt_response):
-            return 0 # , [xval, yval, zval], source_points
+        if numpy_mode:
+            pmt_response[np.isnan(pmt_response)] = 0
+        else:
+            if np.isnan(pmt_response):
+                return 0
+            
         return (radius*pmt_response*area_term) #, [xval, yval, zval], source_points
-
-
 
 
 def build_response_spline(filename):
@@ -284,14 +334,33 @@ def build_response_spline(filename):
 
     _xs = 0.5*(_xs[1:] + _xs[:-1])
     _ys = 0.5*(_ys[1:] + _ys[:-1])
-    xs, ys = np.meshgrid(_xs - pmt_x, _ys-pmt_y )
-    zs = 1 - (xs/pmt_a)**2 - (ys/pmt_b)**2
-
+    xs, ys = np.meshgrid(_xs, _ys )
+    
     key = "avg_charge" if CHARGE else "det_eff"
 
     det_eff = np.array(data["pmt0"][key]).T # /(np.array(data["monitor"][key]).T)
     det_eff[np.isnan(det_eff)]=None
     det_eff[np.isinf(det_eff)]=None
+
+        # fit the circle! 
+    def metric(params):
+        fit_x = params[0]
+        fit_y = params[1] 
+
+        included = ((xs-fit_x)**2 + (ys-fit_y)**2 < pmt_a**2).astype(float)
+        metric = -1*np.sum(det_eff*included)
+        return metric
+    
+    result = minimize(metric, [0.15, 0.15], bounds=((0.1, 0.55), (0.1, 0.55)), options={
+        "eps":1e-2,
+    })
+
+    print("PMT Fit Prefers {}/{}".format(result.x[0], result.x[1]))
+    xs -= result.x[0]
+    ys -= result.x[1]        
+
+    zs = 1 - (xs/pmt_a)**2 - (ys/pmt_b)**2
+
     
     pmt_zenith  = np.arcsin(zs/pmt_c) 
     pmt_azimuth = np.arctan2(ys, xs)
@@ -343,44 +412,89 @@ def get_efficiency(pmt_response_spline, light_zenith, light_azimuth):
 
     return integrated_efficiency/normalization
 
-def calculate_angular_response(pmt_response_spline):
-    """
-    Takes in a PMT response spline 
+def direct_sum(pmt_response_spline, light_zenith, light_azimuth):
 
-    It then evaluates sending light in from different angles and determines how the response varies. 
-    """
+    N_GRID = 150
+    rad_edge = np.linspace(0, 0.3, N_GRID)
+    rad_values = 0.5*(rad_edge[1:] + rad_edge[:-1])
+    rad_widths = rad_edge[1] - rad_edge[0]
 
-    pass 
+    theta_edge = np.linspace(0, 2*pi, N_GRID+1)
+    theta_values = 0.5*(rad_edge[1:] + rad_edge[:-1])
+    theta_widths = theta_edge[1]-theta_edge[0]
+
+    rad_mesh, theta_mesh = np.meshgrid(rad_values, theta_values)
+
+    test= get_differential(pmt_response_spline, rad_mesh, theta_mesh, light_zenith, light_azimuth )
+    ratio = get_differential(pmt_response_spline, rad_mesh, theta_mesh, light_zenith, light_azimuth , True)
+
+    return np.sum(rad_widths*test*theta_widths)/np.sum(rad_widths*ratio*theta_widths) 
 
 if __name__=="__main__":
-    root_folder = os.path.join(os.path.dirname(__file__), "..","results")
-    template = "charge_results_{}.json"
 
-    from tqdm import tqdm
+    datafiles = [
+        [5745, "0mG"],
+        [5769, "-80mG in z"],
+        [5751, "-100mG in z"],
+        [5752, "100mG in z"],
+        [5774, "-100mG in z"],
+        [5773, "250mG in z"],
+        [5766, "80mG in x"],
+        [5749, "250mG in x"],
+        [5750, "40mG in y"],
+        [5771, "100mG in y"],
+        [5776, "-100mG in y"],
+    #    [5755, "80mG in y"],
+        [5748, "250mG in y"],
+        [5777, "100mG in (-Y+X)"],
+        [5780, "100mG in (+Y+X)"]
+    ]
+    for datafile in datafiles:
+        #run_number = 5745 # 0mG 
+        #run_number = 5843
+        run_number = datafile[0]
+        print("Working on {}".format(run_number))
 
-    test_file = os.path.join(
-        root_folder,
-        template.format(5745)
-    )
-    spline = build_response_spline(test_file)
+        root_folder = os.path.join(os.path.dirname(__file__), "..","results")
+        template = "charge_results_{}.json"
 
-    N_GRID = 3
-    zeniths = -1*np.arccos(np.linspace(0,1, N_GRID))
-    azimuths = np.linspace(0, 2*pi, N_GRID+1)
+        from tqdm import tqdm
 
-    results = np.zeros((N_GRID, N_GRID+1))
-    for i,zen in enumerate(zeniths):
-        for j,azi in enumerate(azimuths):
-            results[i][j] = get_efficiency(spline, zen, azi)
+        test_file = os.path.join(
+            root_folder,
+            template.format(run_number)
+        )
+        spline = build_response_spline(test_file)
 
-    data_raw = {
-        "zeniths":zeniths.tolist(),
-        "azimuths":azimuths.tolist(),
-        "efficiency":results.tolist(),
-        "ptf_run_number":5745,
-        "ptf_run_file":test_file,
-    }
-    import json 
-    _obj = open(os.path.join(os.path.dirname(__file__),"output_files","run_{}_angular_efficiency.json"),'rt')
-    json.dump(data_raw, _obj)
-    _obj.close()
+        N_GRID = 50
+        zeniths = -1*np.arccos(np.linspace(0, 1, N_GRID))
+        azimuths = np.linspace(-pi, pi, N_GRID+1)
+
+        results = np.zeros((N_GRID, N_GRID+1))
+        for i,zen in tqdm(enumerate(zeniths)):
+            for j,azi in enumerate(azimuths):
+                results[i][j] = direct_sum(spline, zen, azi)
+
+        plt.figure(figsize=(4,3))
+        plt.pcolormesh(np.cos(zeniths), azimuths, results.T, cmap="inferno", vmin=0, vmax=0.5)
+        plt.colorbar()
+        plt.xlabel("-cos(Zenith)", size=14)
+        plt.ylabel("Azimuth", size=14)
+        plt.tight_layout()
+        plt.savefig(
+            os.path.join(os.path.dirname(__file__), "plots","angular_response_{}.png".format(run_number)),
+            dpi=400
+        )
+        plt.close()
+
+        data_raw = {
+            "zeniths":zeniths.tolist(),
+            "azimuths":azimuths.tolist(),
+            "efficiency":results.tolist(),
+            "ptf_run_number":run_number,
+            "ptf_run_file":test_file,
+        }
+        import json 
+        _obj = open(os.path.join(os.path.dirname(__file__),"output_files","run_{}_angular_efficiency.json".format(run_number)),'wt')
+        json.dump(data_raw, _obj, indent=4)
+        _obj.close()
